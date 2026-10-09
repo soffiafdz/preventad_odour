@@ -1,0 +1,6 @@
+Type: Project
+Package: preventadodour
+Version: 0.1.0
+Depends: R (>= 4.6)
+Imports:
+    lintr

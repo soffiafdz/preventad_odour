@@ -1,0 +1,9 @@
+linters: linters_with_defaults(
+    line_length_linter(80L),
+    object_name_linter(regexes = c(
+      project = "^(\\.?[a-z][a-z0-9_]*(\\.df|\\.dt|\\.fct|\\.fit|\\.fn|\\.lst|\\.mat|\\.mod|\\.path|\\.plt|\\.subdt|\\.res|\\.tbl|\\.v)?|[A-Z][A-Z0-9_]*)$"
+    )),
+    # data.table column names inside [ ] look like undefined globals
+    object_usage_linter = NULL
+  )
+encoding: "UTF-8"

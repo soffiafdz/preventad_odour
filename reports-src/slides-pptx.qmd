@@ -1,0 +1,500 @@
+---
+title: "Odour identification over time in PREVENT-AD"
+subtitle: "Is losing the sense of smell an early sign\ of Alzheimer's disease in people at risk?"
+date: today
+date-format: long
+format:
+  # Generated from slides.qmd by make_pptx_copy.py; do not edit
+  pptx:
+    reference-doc: slides-reference.pptx
+    output-file: slides.pptx
+---
+
+```{r}
+#| label: setup
+suppressPackageStartupMessages({
+  library(here)
+  library(data.table)
+})
+here::i_am("reports-src/slides-pptx.qmd")
+source(here("R/utils/config.R"))
+load_config()
+invisible(list2env(
+  readRDS(get_data_path("outputs", "summary_env")), environment()
+))
+
+# Formatting only: every number comes from summary_env.rds (08)
+num.fn <- function(x, digits = 2) {
+  sub("^-", "−", formatC(x, format = "f", digits = digits))
+}
+ci.fn <- function(x, digits = 2) {
+  sprintf("[%s, %s]", num.fn(x$lower, digits), num.fn(x$upper, digits))
+}
+p.fn <- function(p) {
+  if (p < 0.001) return("p\u00a0<\u00a0.001")
+  # Non-breaking spaces keep "p = .017" on one line
+  sub("0.", ".", sprintf(if (p < 0.1) "p\u00a0=\u00a0%.3f" else
+    "p\u00a0=\u00a0%.2f", p), fixed = TRUE)
+}
+loss.fn <- function(x) num.fn(-x$estimate)
+loss_ci.fn <- function(x) {
+  sprintf("[%s, %s]", num.fn(-x$upper), num.fn(-x$lower))
+}
+pct.fn <- function(count, n) sprintf("%.0f%%", 100 * count / n)
+# Bold marks a test whose 95% CI excludes no effect (0, or 1 for a ratio)
+bold.fn <- function(text, x, null = 0) {
+  if (x$lower > null || x$upper < null) sprintf("**%s**", text) else text
+}
+# A test result: estimate, 95% CI and, when asked, p; bold as above
+res.fn <- function(x, null = 0, with_p = FALSE) {
+  text <- paste(num.fn(x$estimate), ci.fn(x))
+  if (with_p) text <- paste0(text, ", ", p.fn(x$p))
+  bold.fn(text, x, null)
+}
+# The same for a change reported as a loss (sign flipped)
+loss_res.fn <- function(x, with_p = FALSE) {
+  text <- paste(loss.fn(x), loss_ci.fn(x))
+  if (with_p) text <- paste0(text, ", ", p.fn(x$p))
+  bold.fn(text, x)
+}
+big.fn <- function(x) formatC(x, format = "d", big.mark = ",")
+
+traj <- config$trajectories
+age.lst <- trajectories$age
+total.dt <- age.lst$total
+classes.dt <- age.lst$classes
+main.dt <- classes.dt[which.max(n)]
+compared <- class_pathology$age$compared
+faster.dt <- classes.dt[group == compared]
+other.dt <- classes.dt[!group %in% c(main.dt$group, compared)]
+at.fn <- function(g) pathology$at_slopes[group == g]
+class_path.dt <- class_pathology$age$summary
+years.lst <- trajectories$years_since_baseline
+same_class_n <- class_agreement[
+  class_age == class_years_since_baseline, sum(N)
+]
+selected.v <- unlist(traj$selected_model)
+
+cog <- cognition
+step <- cog$upsit_step
+low <- cog$per_lower
+delayed <- "delayed_memory_index_score_60_69"
+immediate <- "immediate_memory_index_score_60_69"
+total <- "total_scale_index_score_60_69"
+coupling.dt <- cog$coupling$slopes
+r.fn <- function(score_col) coupling.dt[coupling.dt$score == score_col]
+horizon <- cog$mci_horizon
+risk.fn <- function(lvl) horizon$incidence[level == lvl]
+
+cx <- classes_extra
+prof.fn <- function(lbl, g) cx$profile[panel == lbl & group == g]
+amyloid_faster <- prof.fn("Amyloid positive", compared)
+amyloid_main <- prof.fn("Amyloid positive", main.dt$group)
+apoe_faster <- prof.fn("APOE ε4 carrier", compared)
+apoe_main <- prof.fn("APOE ε4 carrier", main.dt$group)
+tau.dt <- cx$at_groups[grepl("T\\+$", level)]
+tau_main <- tau.dt[startsWith(as.character(group), main.dt$group), sum(N)]
+first_faster.dt <- cx$diagnoses[
+  startsWith(as.character(panel), compared) & group == "First"
+]
+reduced_faster <- first_faster.dt[level != "Normosmia", sum(N)]
+mem.fn <- function(g) cx$memory[class == g]
+mem_diff.fn <- function(g) {
+  m <- mem.fn(g)
+  loss_res.fn(list(estimate = m$slope_diff, lower = m$slope_diff_lower,
+                   upper = m$slope_diff_upper, p = m$slope_diff_p),
+              with_p = TRUE)
+}
+mem_loss.fn <- function(g) {
+  m <- mem.fn(g)
+  sprintf("%s [%s, %s]", num.fn(-m$slope), num.fn(-m$slope_upper),
+          num.fn(-m$slope_lower))
+}
+per_year.dt <- cx$sample[panel == "UPSIT tests per year"]
+pause.v <- as.integer(as.character(per_year.dt[N == 0, x]))
+
+md <- modifiers
+mod.fn <- function(t) md$modifiers[term == t]
+prog.fn <- function(g) md$progression[group == g]
+adiff.fn <- function(s) md$amyloid_diff[status == s]
+
+# Claims the slides make, checked against the numbers
+stopifnot(
+  length(pause.v) > 0, all(diff(pause.v) == 1),
+  mem.fn(compared)$slope_diff_lower < 0, mem.fn(compared)$slope_diff_upper > 0,
+  mem.fn(other.dt$group)$slope_diff_upper < 0,
+  mod.fn("apoe_carrier")$lower < 0, mod.fn("apoe_carrier")$upper > 0,
+  mod.fn("female")$lower < 0, mod.fn("female")$upper > 0,
+  prog.fn("A+ MCI")$estimate == min(md$progression$estimate),
+  adiff.fn("MCI")$upper < 0,
+  all(grepl("_slope_", selected.v)),
+  pathology$amyloid$difference$upper < 0, pathology$tau$difference$upper < 0,
+  low$h1[[delayed]]$lower < 0, low$h1[[delayed]]$upper > 0,
+  low$h2[[delayed]]$upper > 0, low$h2[[delayed]]$p > 0.05,
+  all(coupling.dt$lower > 0),
+  low$h3$main$lower > 1, low$h3$amyloid$lower > 1,
+  cog$amyloid_hr$lower > 1,
+  nrow(risk.fn("low")) == 1, nrow(risk.fn("high")) == 1
+)
+```
+
+## `r total.dt$n` people with repeated smell tests, followed `r num.fn(total.dt$follow_up_mean, 1)` years on average
+
+Cognitively unimpaired adults with a family history of Alzheimer's disease.
+**Bold** results: the 95% CI excludes no effect.
+
+| Age at first test | Women | Education | APOE ε4 |
+|---|---|---|---|
+| **`r num.fn(total.dt$age_mean, 1)`** years, on average | **`r pct.fn(total.dt$n_female, total.dt$n)`** of participants | **`r num.fn(total.dt$education_mean, 1)`** years, on average | **`r pct.fn(total.dt$n_apoe_carrier, total.dt$n)`** carriers |
+| SD `r num.fn(total.dt$age_sd, 1)` | `r total.dt$n_female` of `r total.dt$n` | SD `r num.fn(total.dt$education_sd, 1)` | `r total.dt$n_apoe_carrier` of `r total.dt$n` |
+| Smell over time: **`r total.dt$n`** with 2+ UPSIT | Amyloid and tau: **`r pathology$participants`** with PET | Memory: **`r cog$rbans$participants`** with RBANS | MCI: **`r low$h3$main$events`** of `r low$h3$main$n` followed |
+
+## `r big.fn(cx$n$tests)` smell tests, with a pause from `r min(pause.v)` to `r max(pause.v)`
+
+`r gsub(" ?<br>", " ", sprintf("%d people with 2 or more UPSIT tests; INTREPAD 3-month retests left out.", cx$n$participants))`
+
+```{r}
+knitr::include_graphics(cx$sample_slide_figure)
+```
+
+::: {.notes}
+Smell testing stopped during the COVID-19 period and restarted in
+`r max(pause.v) + 1`.
+:::
+
+## Does everyone's sense of smell change the same way?
+
+Groups of people with similar smell trajectories,\
+and who is in each group
+
+## Latent class mixed model
+
+- Finds subgroups of people whose UPSIT changes with age in a similar way
+- Each subgroup has its own average curve;\
+  each person is assigned to their most likely subgroup
+- People can vary around their subgroup's curve (random intercept and slope)
+- We compared 1 to 5 subgroups and kept `r age.lst$n_classes`:\
+  the best fit, with clearly separated subgroups
+- `r age.lst$participants` people with 2 or more UPSIT tests
+
+::: {.notes}
+lcmm::hlme, maximum likelihood, `r age.lst$n_starts` random starts per model.
+Grid: 1 to 5 classes × linear or quadratic × no random effects, intercept,
+or intercept and slope. Selected: `r tolower(age.lst$degree)`, random
+intercept and slope (one covariance across classes), by BIC, mean posterior
+probability (`r num.fn(age.lst$posterior_range[1])` to
+`r num.fn(age.lst$posterior_range[2])`) and class size. Age as
+(age − `r traj$age_centre`) / `r traj$time_divisor`. On years: age at the
+first test and age × time common to all classes; `r years.lst$n_classes`
+classes, `r tolower(years.lst$degree)`. INTREPAD 3-month retest left out.
+:::
+
+## Most people keep high smell scores; one in `r round(age.lst$participants / faster.dt$n)` declines faster
+
+`r gsub(" ?<br>", " ", sprintf("%d people, UPSIT (0 to 40). Group means with 95%% confidence bands; faint lines: each person.<br>Faster decline: %d people. Floor: %d people, low scores from the first test.", age.lst$participants, faster.dt$n, other.dt$n))`
+
+```{r}
+knitr::include_graphics(age.lst$slide_figure)
+```
+
+## The same groups over years of follow-up
+
+`r gsub(" ?<br>", " ", sprintf("%d people, adjusted for age at the first test (curves for age %.0f). %s are in the same group as on age.", years.lst$participants, years.lst$total$age_mean, pct.fn(same_class_n, years.lst$participants)))`
+
+```{r}
+knitr::include_graphics(years.lst$slide_figure)
+```
+
+## Describing the groups
+
+- Share of each group that is amyloid positive, tau positive,\
+  APOE ε4 carrier and female, with 95% confidence intervals
+- Olfactory diagnosis from the UPSIT norms\
+  at each person's first and last test
+- Delayed memory over time by group: linear mixed model,\
+  adjusted for age, sex, education, RBANS version and practice effects
+- The faster-decline and floor groups have `r faster.dt$n` and
+  `r other.dt$n` people:\
+  shares are described, not tested
+
+::: {.notes}
+Shares: Wilson 95% intervals (prop.test without continuity correction).
+Amyloid (Centiloid > `r pathology$amyloid_cutoff`) and tau
+(meta‑ROI SUVR > `r pathology$tau_cutoff`) at the first PET, in people with
+PET.
+Diagnoses as recorded with each UPSIT (normosmia to anosmia).
+
+Memory: nlme::lme, REML. RBANS delayed memory index (60–69 norms) ~ years
+since the first UPSIT × group + (age at the first UPSIT + sex + education)
+× years + version (A to D) + practice (first RBANS vs later); random
+intercept and slope per person. Differences in yearly change against the
+main group. `r cx$memory_n$participants` people,
+`r big.fn(cx$memory_n$visits)` RBANS visits from the first UPSIT on.
+:::
+
+## Faster decline: `r sprintf("%.0f%%", amyloid_faster$pct)` amyloid positive, against `r sprintf("%.0f%%", amyloid_main$pct)` in the main group
+
+`r gsub(" ?<br>", " ", sprintf("Share of each group with 95%% confidence intervals; counts beside. Amyloid and tau at the first PET scan, in people with PET.<br>APOE ε4: %s of the faster-decline group, %s of the main group. The two smaller groups are too small to compare.", sprintf("%.0f%%", apoe_faster$pct), sprintf("%.0f%%", apoe_main$pct)))`
+
+```{r}
+knitr::include_graphics(cx$profile_slide_figure)
+```
+
+## `r tau_main` of the `r sum(tau.dt$N)` tau-positive people are in the main group
+
+`r gsub(" ?<br>", " ", sprintf("%d people with amyloid and tau PET, %s of them in the main group; counts in the bars.<br>Positive: Centiloid > %g; tau meta-ROI SUVR > %g.", cx$at_groups[, sum(N)], pct.fn(cx$at_groups[startsWith(as.character(group), main.dt$group), sum(N)], cx$at_groups[, sum(N)]), pathology$amyloid_cutoff, pathology$tau_cutoff))`
+
+```{r}
+knitr::include_graphics(cx$at_slide_figure)
+```
+
+## In the faster-decline group, `r reduced_faster` of `r sum(first_faster.dt$N)` had reduced smell at the first test
+
+```{r}
+knitr::include_graphics(cx$diagnosis_slide_figure)
+```
+
+## Memory declined faster only in the floor group, of `r other.dt$n` people
+
+`r gsub(" ?<br>", " ", sprintf("Delayed memory index points lost a year: main %s, faster decline %s, floor %s.<br>Extra loss a year, floor against main: %s (%d people). %d people, %s RBANS visits; curves for age %g.", mem_loss.fn(main.dt$group), mem_loss.fn(compared), mem_loss.fn(other.dt$group), mem_diff.fn(other.dt$group), other.dt$n, cx$memory_n$participants, big.fn(cx$memory_n$visits), traj$age_centre))`
+
+```{r}
+knitr::include_graphics(cx$memory_slide_figure)
+```
+
+## Is faster smell loss a sign of Alzheimer's pathology?
+
+Amyloid and tau on PET, APOE ε4, sex,\
+and later progression to MCI
+
+## Linear mixed models
+
+- UPSIT over years since the first test,\
+  with a random intercept and slope per person
+- Amyloid × time tests whether yearly change differs by amyloid status;\
+  tau in a separate model
+- Positive at the first PET: Centiloid > `r pathology$amyloid_cutoff`; tau meta‑ROI SUVR > `r pathology$tau_cutoff`
+- Adjusted for age at the first test and sex
+- `r pathology$participants` people with PET
+
+::: {.notes}
+lcmm::hlme (one class), maximum likelihood, Wald 95% CIs. Fixed effects:
+years + marker + marker × years + age at first test + sex, each covariate
+× years. Random intercept and slope, unstructured. Continuous markers:
+Centiloid per `r pathology$centiloid_step`, SUVR per `r pathology$tau_step`.
+A/T groups in one model. `r big.fn(pathology$assessments)` tests; first PET
+a median of `r num.fn(pathology$years_to_pet_median, 1)` years after the
+first UPSIT.
+:::
+
+## Smell declines faster with amyloid and with tau
+
+`r gsub(" ?<br>", " ", sprintf("%d people with PET. Extra UPSIT points lost a year: amyloid %s, tau %s.<br>%d tau positive; PET came a median of %.1f years after the first smell test.", pathology$participants, loss_res.fn(pathology$amyloid$difference), loss_res.fn(pathology$tau$difference), pathology$tau_positive, pathology$years_to_pet_median))`
+
+```{r}
+knitr::include_graphics(pathology$slide_figure)
+```
+
+## Loss a year with amyloid, tau or both
+
+**Both rests on `r at.fn("A+T+")$participants` people:** 95% CI
+`r loss_ci.fn(at.fn("A+T+"))` points a year.
+
+| Neither (A−T−) | Amyloid alone (A+T−) | Both (A+T+) |
+|---|---|---|
+| **`r loss.fn(at.fn("A-T-"))`** UPSIT points a year | **`r loss.fn(at.fn("A+T-"))`** UPSIT points a year | **`r loss.fn(at.fn("A+T+"))`** UPSIT points a year |
+| `r at.fn("A-T-")$participants` people | `r at.fn("A+T-")$participants` people | `r at.fn("A+T+")$participants` people |
+
+## APOE ε4, sex and progression to MCI
+
+- UPSIT over years since the first test, linear mixed models as before
+- APOE ε4 × time and sex × time test whether yearly change\
+  differs by carrier status or by sex;\
+  adjusted for age at the first test
+- Progression: four groups by amyloid status and by a later MCI
+  diagnosis,\
+  each with its own starting level and yearly change;\
+  adjusted for age at the first test and sex
+- `r md$n$participants` people; `r md$n$progression_participants` with PET
+  for progression
+
+::: {.notes}
+nlme::lme, REML, Wald 95% CIs; random intercept and slope per person,
+unstructured. APOE and sex: UPSIT ~ years + (APOE ε4 + female + age at the
+first test) × years, APOE and sex centred at their sample means, so the
+years term is the average yearly change. Progression: UPSIT ~ 0 + group +
+group × years + (age at the first test + sex) × years; groups A− or A+ at
+the first PET × stayed unimpaired or diagnosed with MCI (first MCI visit in
+the study's MCI review; `r md$n$reverted_left_out` reverted cases left out).
+Progression is known only after the fact and the MCI groups are small, so
+these slopes are descriptive.
+:::
+
+## No clear difference in smell decline by APOE ε4 or by sex
+
+`r md$n$participants` people. Extra loss against non-carriers and against
+men.
+
+| Everyone | APOE ε4 carriers | Women |
+|---|---|---|
+| **`r loss.fn(mod.fn("Average yearly change"))`** UPSIT points lost a year | **`r loss.fn(mod.fn("apoe_carrier"))`** extra points a year | **`r loss.fn(mod.fn("female"))`** extra points a year |
+| 95% CI `r loss_ci.fn(mod.fn("Average yearly change"))` | `r bold.fn(paste0("95% CI ", loss_ci.fn(mod.fn("apoe_carrier")), ", ", p.fn(mod.fn("apoe_carrier")$p)), mod.fn("apoe_carrier"))` | `r bold.fn(paste0("95% CI ", loss_ci.fn(mod.fn("female")), ", ", p.fn(mod.fn("female")$p)), mod.fn("female"))` |
+
+## Smell fell fastest with both amyloid and a later MCI diagnosis
+
+`r gsub(" ?<br>", " ", sprintf("%d people with PET. UPSIT points lost a year: amyloid positive and later MCI %s %s.<br>Extra loss with amyloid: stayed unimpaired %s; diagnosed with MCI %s.", md$n$progression_participants, loss.fn(prog.fn("A+ MCI")), loss_ci.fn(prog.fn("A+ MCI")), loss_res.fn(adiff.fn("stayed"), with_p = TRUE), loss_res.fn(adiff.fn("MCI"), with_p = TRUE)))`
+
+```{r}
+knitr::include_graphics(md$progression_slide_figure)
+```
+
+## Does poorer smell come with memory decline and MCI?
+
+Delayed memory on the RBANS\
+and diagnoses of mild cognitive impairment
+
+## Regression and linear mixed models
+
+- At the first visit: linear regression of RBANS delayed memory on UPSIT
+- Over time: RBANS scores with a random intercept and slope per person
+- UPSIT × time tests whether people with lower UPSIT decline faster
+- Adjusted for age, sex, education, RBANS version and practice effects
+- `r cog$rbans$participants` people, `r big.fn(cog$rbans$visits)` RBANS visits
+
+::: {.notes}
+Over time: nlme::lme, REML; RBANS ~ years × UPSIT + (age + sex +
+education) × years + version (A to D) + practice (first RBANS vs later);
+random intercept and slope, unstructured. RBANS delayed memory index, 60–69
+norms (not age-adjusted). Sensitivity: + APOE ε4. Secondary outcomes, more
+points lost a year per `r step` UPSIT points lower: immediate memory
+`r num.fn(-low$h2[[immediate]]$estimate)` (`r p.fn(low$h2[[immediate]]$p)`),
+total scale `r num.fn(-low$h2[[total]]$estimate)`
+(`r p.fn(low$h2[[total]]$p)`).
+:::
+
+## Poorer smell: no memory difference at the first test and no clear faster decline
+
+`r gsub(" ?<br>", " ", sprintf("%d people. Per %d UPSIT points lower, difference at the first test: %s; extra points lost a year: %s.", cog$rbans$participants, step, res.fn(low$h1[[delayed]], with_p = TRUE), loss_res.fn(low$h2[[delayed]], with_p = TRUE)))`
+
+```{r}
+knitr::include_graphics(cog$memory_slide_figure)
+```
+
+## Bivariate linear mixed model
+
+- UPSIT and RBANS modelled together in one linear mixed model
+- Random slopes: each person's own rate of change in smell and in memory
+- Result: the correlation between the two rates across people
+- Adjusted for age, sex, education, RBANS version and practice effects
+- `r cog$coupling$participants` people; 95% CIs by bootstrap
+
+::: {.notes}
+`r cd <- cog$coupling$delayed` How the slope correlation was calculated
+(delayed memory; the other scores use the same model).
+
+Data: one long table. UPSIT rows are the trajectory sample's tests
+(`r cd$participants` people with 2+ UPSIT, INTREPAD 3-month retest left out;
+`r big.fn(cd$upsit_assessments)` rows). RBANS rows are every visit of the
+same people with a delayed memory score (`r big.fn(cd$rbans_visits)` rows;
+`r cd$rbans_before_first_upsit` visits before the first UPSIT kept at
+negative time). An indicator marks the outcome of each row. Time is years
+since the person's first UPSIT, in decades for fitting.
+
+Fixed effects, separate for each outcome: intercept, slope over time, age at
+the first UPSIT ((age − `r traj$age_centre`) / `r traj$time_divisor`), sex,
+education. RBANS rows only: test version (B, C, D against A) and practice
+(0 at the first RBANS, 1 after).
+
+Random effects per person: UPSIT intercept, UPSIT slope, RBANS intercept,
+RBANS slope, with an unstructured 4 × 4 covariance (pdSymm). Residuals
+independent, with their own variance per outcome (varIdent; RBANS residual
+SD `r num.fn(cd$residual_ratio, 1)` times UPSIT's). Fitted with nlme::lme,
+REML.
+
+Estimate: the covariance of the two random slopes is
+`r num.fn(cd$slope_cov)` per year² (UPSIT points × index points); slope SDs
+`r num.fn(cd$slope_sd_upsit)` UPSIT points and
+`r num.fn(cd$slope_sd_rbans)` index points a year. Covariance divided by the
+two SDs gives the correlation, `r num.fn(r.fn(delayed)$estimate)`; it does
+not depend on the time unit. Other correlations are small: intercepts
+`r num.fn(cd$intercept_cor)`, intercepts with slopes at most
+`r num.fn(cd$max_level_rate_cor)`.
+
+95% CI `r ci.fn(r.fn(delayed))`: people resampled with replacement
+`r big.fn(cog$coupling$bootstrap_reps)` times (a person drawn twice enters as
+two people), the model refitted each time, 2.5th and 97.5th percentiles;
+`r cd$failed` failed fits. Bootstrap because nlme's own intervals for
+variance components failed for some scores.
+
+Reading: association between person-level rates over the same period; it
+says nothing about which declines first. Assumes a straight-line change per
+person; the CI is wide because each person's rate rests on few visits.
+:::
+
+## Within a person, smell and memory decline together
+
+`r gsub(" ?<br>", " ", sprintf("%d people; each point is one person’s estimated yearly change; dashed lines: no change.<br>Correlation of the two rates: delayed memory %s, immediate memory %s, total scale %s.", cog$coupling$participants, res.fn(r.fn(delayed)), res.fn(r.fn(immediate)), res.fn(r.fn(total))))`
+
+```{r}
+knitr::include_graphics(cog$coupling$slide_figure)
+```
+
+## Cox proportional hazards models
+
+- Time from the first UPSIT to the first MCI diagnosis
+- Hazard ratio of MCI per `r step` points lower UPSIT at the first test
+- Adjusted for age, sex and education;\
+  then also for amyloid status, in people with PET
+- People without MCI are followed to their last visit\
+  or to the last MCI review (`r format(cog$mci$coverage_end, "%B %Y")`)
+- `r low$h3$main$n` people, `r low$h3$main$events` with MCI
+
+::: {.notes}
+survival::coxph. Proportional hazards (scaled Schoenfeld residuals) held
+for UPSIT (`r p.fn(cog$h3$main$ph_p_upsit)`), not for education.
+Sensitivity: + APOE ε4. `r cog$mci$reverted` people whose MCI reverted to
+normal left out. Curves for average age, sex and education.
+:::
+
+## Poorer smell, higher risk of MCI
+
+`r gsub(" ?<br>", " ", sprintf("%d people, %d with MCI. Hazard ratio per %d UPSIT points lower: %s.<br>By %d years: %s with MCI at UPSIT %d, %s at UPSIT %d; %d people still followed.", low$h3$main$n, low$h3$main$events, step, res.fn(low$h3$main, null = 1, with_p = TRUE), horizon$years, sprintf("%.0f%%", risk.fn("low")$fit), risk.fn("low")$upsit, sprintf("%.0f%%", risk.fn("high")$fit), risk.fn("high")$upsit, horizon$at_risk))`
+
+```{r}
+knitr::include_graphics(cog$mci_slide_figure)
+```
+
+## Adjusting for amyloid status did not change the link with MCI
+
+**`r low$h3$amyloid$n` people with PET, `r low$h3$amyloid$events` with MCI;
+smell per `r step` UPSIT points lower.**\
+Amyloid status comes from a scan a median of
+`r num.fn(pathology$years_to_pet_median, 1)` years after the first smell test.
+
+| Smell, without amyloid | Smell, with amyloid | Amyloid itself |
+|---|---|---|
+| **`r num.fn(low$h3$pet_sample$estimate)`** hazard ratio | **`r num.fn(low$h3$amyloid$estimate)`** hazard ratio | **`r num.fn(cog$amyloid_hr$estimate)`** hazard ratio |
+| `r bold.fn(paste("95% CI", ci.fn(low$h3$pet_sample)), low$h3$pet_sample, null = 1)` | `r bold.fn(paste("95% CI", ci.fn(low$h3$amyloid)), low$h3$amyloid, null = 1)` | `r bold.fn(paste("95% CI", ci.fn(cog$amyloid_hr)), cog$amyloid_hr, null = 1)` |
+
+## What we found
+
+- **Most people keep their sense of smell; one in `r round(age.lst$participants / faster.dt$n)` declines faster**\
+  `r sprintf("%.0f%%", amyloid_faster$pct)` of the faster group amyloid positive, `r sprintf("%.0f%%", amyloid_main$pct)` of the main group
+- **Smell declines faster with amyloid and tau, not with APOE ε4 or sex**\
+  `r loss.fn(pathology$amyloid$difference)` and `r loss.fn(pathology$tau$difference)` extra points a year; fastest with amyloid and later MCI
+- **Poorer smell, higher risk of MCI**\
+  `r round(100 * (low$h3$main$estimate - 1))`% higher risk per `r step` UPSIT points lower, unchanged by amyloid status
+- **Within a person, smell and memory decline together**\
+  correlation `r num.fn(r.fn(delayed)$estimate)` for delayed memory; no clear link with the first UPSIT score
+
+## What these results cannot tell us yet
+
+- **Order of events:** PET came a median of
+  `r num.fn(pathology$years_to_pet_median, 1)` years after the first smell
+  test
+- **Progression** is known only after the fact: the MCI groups describe
+- **Small groups:** `r faster.dt$n` people with faster decline,
+  `r pathology$tau_positive` tau positive, `r low$h3$main$events` with MCI
+- **Several outcomes,** with no correction for multiple testing
+- **MCI reviews** end in `r format(cog$mci$coverage_end, "%B %Y")`; later
+  diagnoses are not counted

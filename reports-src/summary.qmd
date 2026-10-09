@@ -1,0 +1,832 @@
+---
+title: "Odour identification over time in PREVENT-AD"
+subtitle: "Trajectory classes and amyloid and tau PET: methods, decisions and preliminary results"
+date: today
+bibliography: references.bib
+---
+
+```{r}
+#| label: setup
+suppressPackageStartupMessages({
+  library(here)
+  library(data.table)
+})
+here::i_am("reports-src/summary.qmd")
+source(here("R/utils/config.R"))
+source(here("R/utils/tables.R"))
+load_config()
+invisible(list2env(
+  readRDS(get_data_path("outputs", "summary_env")), environment()
+))
+
+# Formatting only: every number comes from summary_env.rds (08)
+num.fn <- function(x, digits = 2) formatC(x, format = "f", digits = digits)
+loss.fn <- function(x) num.fn(-x$estimate)
+loss_ci.fn <- function(x) {
+  sprintf(
+    "%s (95%% CI %s to %s)",
+    num.fn(-x$estimate), num.fn(-x$upper), num.fn(-x$lower)
+  )
+}
+est_ci.fn <- function(x) {
+  sprintf(
+    "%s (95%% CI %s to %s)",
+    num.fn(x$estimate), num.fn(x$lower), num.fn(x$upper)
+  )
+}
+pct.fn <- function(count, n) sprintf("%.0f%%", 100 * count / n)
+
+TRAJ <- config$trajectories
+age.lst <- trajectories$age
+classes.dt <- age.lst$classes
+main.dt <- classes.dt[which.max(n)]
+compared <- class_pathology$age$compared
+faster.dt <- classes.dt[group == compared]
+other.dt <- classes.dt[!group %in% c(main.dt$group, compared)]
+predicted.fn <- function(class_label, at) {
+  age.lst$predicted[class == class_label & time == at, fit]
+}
+at.fn <- function(g) pathology$at_slopes[group == g]
+at_size.fn <- function(g) pathology$at_sizes[group == g, N]
+class_path.dt <- class_pathology$age$summary
+amyloid_pct.fn <- function(g) {
+  class_path.dt[group == g, pct.fn(n_amyloid_positive, n_pet)]
+}
+
+# Model comparison quantities used in the text
+comparison.dt <- age.lst$comparison
+model.fn <- function(d, r, g) {
+  comparison.dt[
+    degree == d & random == r & n_classes == g
+  ]
+}
+selected.dt <- comparison.dt[selected == TRUE]
+best_bic.dt <- comparison.dt[which.min(bic)]
+lower_bic.dt <- comparison.dt[bic < selected.dt$bic]
+participants.fn <- function(n) {
+  sprintf("%d participant%s", n, ifelse(n == 1, "", "s"))
+}
+bic_none_1 <- model.fn("Quadratic", "None", 1)$bic
+bic_slope_1 <- model.fn("Quadratic", "Intercept and slope", 1)$bic
+linear_selected.dt <- model.fn(
+  "Linear", selected.dt$random, selected.dt$n_classes
+)
+analysed_participants <- age.lst$participants
+dropped_single <- data$extract_participants - analysed_participants
+at_modelled_n <- sum(pathology$at_sizes[group %in% pathology$at_modelled, N])
+
+# Years since the first test
+years.lst <- trajectories$years_since_baseline
+y_classes.dt <- years.lst$classes
+y_main.dt <- y_classes.dt[which.max(n)]
+y_compared <- class_pathology$years_since_baseline$compared
+y_faster.dt <- y_classes.dt[group == y_compared]
+y_other.dt <- y_classes.dt[!group %in% c(y_main.dt$group, y_compared)]
+y_predicted.fn <- function(class_label, at) {
+  years.lst$predicted[class == class_label & time == at, fit]
+}
+y_comparison.dt <- years.lst$comparison
+y_model.fn <- function(d, r, g) {
+  y_comparison.dt[degree == d & random == r & n_classes == g]
+}
+y_selected.dt <- y_comparison.dt[selected == TRUE]
+y_slope_gain <- y_model.fn("Linear", "Intercept", 1)$bic -
+  y_model.fn("Linear", "Intercept and slope", 1)$bic
+y_quad_slope.dt <- y_comparison.dt[
+  degree == "Quadratic" & random == "Intercept and slope" & n_classes >= 3
+]
+y_empty.dt <- y_comparison.dt[
+  degree == "Linear" & random == "Intercept and slope" & min_class_n == 0
+]
+y_intercept_best.dt <- y_comparison.dt[random == "Intercept"][which.min(bic)]
+y_class_path.dt <- class_pathology$years_since_baseline$summary
+y_amyloid_pct.fn <- function(g) {
+  y_class_path.dt[group == g, pct.fn(n_amyloid_positive, n_pet)]
+}
+y_tau_pct.fn <- function(g) {
+  y_class_path.dt[group == g, pct.fn(n_tau_positive, n_tau)]
+}
+agreement.dt <- class_agreement
+agree.fn <- function(a, y) {
+  agreement.dt[class_age == a & class_years_since_baseline == y, sum(N)]
+}
+same_class_n <- agreement.dt[class_age == class_years_since_baseline, sum(N)]
+```
+
+# Purpose of this document
+
+This document describes the analysis of longitudinal odour identification
+in PREVENT-AD in enough detail to write it up and to defend it. For each
+step it gives what was done, why, and which alternatives were considered and
+rejected. Every number is computed by the analysis pipeline and inserted
+automatically, so the text and the results cannot drift apart. The results
+are preliminary and exploratory.
+
+**Main findings.**
+
+- Among `r analysed_participants` cognitively unimpaired participants,
+  latent class models identified three trajectories of UPSIT score with age:
+  a main class with slow decline that accelerates with age
+  (`r num.fn(main.dt$pct, 0)`%), a faster-decline class
+  (`r num.fn(faster.dt$pct, 0)`%), and a small class with very low scores
+  throughout (`r num.fn(other.dt$pct, 0)`%). On years since the first
+  test, adjusted for age at entry, the same three patterns appeared
+  (`r num.fn(y_main.dt$pct, 0)`%, `r num.fn(y_faster.dt$pct, 0)`% and
+  `r num.fn(y_other.dt$pct, 0)`%), and `r same_class_n` of
+  `r analysed_participants` participants were in the same class on both.
+- In the `r pathology$participants` participants with PET,
+  amyloid-positive participants lost
+  `r loss.fn(pathology$amyloid$positive)` UPSIT points per year, against
+  `r loss.fn(pathology$amyloid$negative)` for amyloid-negative
+  participants. Participants with both amyloid and tau (A+T+, n
+  = `r at.fn("A+T+")$participants`) lost `r loss.fn(at.fn("A+T+"))` points
+  per year. Scores at the first test did not differ by amyloid or tau status.
+- Amyloid positivity was more frequent in the faster-decline class than in
+  the main class, on age (`r amyloid_pct.fn(compared)` against
+  `r amyloid_pct.fn(main.dt$group)`) and on years since the first test
+  (`r y_amyloid_pct.fn(y_compared)` against
+  `r y_amyloid_pct.fn(y_main.dt$group)`). This comparison is descriptive
+  only.
+
+# Data {#sec-data}
+
+## Odour identification
+
+The outcome is the total score of the University of Pennsylvania Smell
+Identification Test (UPSIT), a 40-item forced-choice test scored from
+`r data$score_range[1]` to `r data$score_range[2]` [@doty1984]. Only the
+total score was used: item-level responses were not needed for the question,
+and the total score is the clinically interpreted measure.
+
+The extract contained `r data$extract_participants` participants and
+`r data$extract_assessments` assessments. The following decisions defined
+the analysis sample.
+
+- **Date corrections.** In `r data$corrected_dates` follow-up assessments,
+  the recorded date was the baseline date. The data provider supplied the
+  correct dates, and the ages at those assessments were moved by the same
+  interval.
+- **INTREPAD 3-month retest excluded.** Visit `r data$excluded_visits`
+  (`r data$excluded_visit_rows` assessments) exists only for participants in
+  the INTREPAD trial, three months after baseline and during treatment.
+  Keeping it would give trial participants an extra, very early assessment
+  that observational participants do not have, which could create spurious
+  differences in early trajectories between the two groups.
+- **At least `r data$min_assessments` assessments.** A trajectory, and
+  especially an individual rate of change, needs repeated measures.
+  `r dropped_single` participants were excluded for this reason.
+- **Participants with anosmia kept.** Excluding them would remove,
+  by design, the low end of the outcome. The PI decided to keep them; they
+  form most of the smallest class (Section [-@sec-classes]).
+
+The analysis sample has `r analysed_participants` participants and
+`r age.lst$assessments` assessments (median
+`r age.lst$total$assessments_median` per participant), with a mean
+follow-up of `r num.fn(age.lst$total$follow_up_mean, 1)` years (SD
+`r num.fn(age.lst$total$follow_up_sd, 1)`) and a mean age at the first
+test of `r num.fn(age.lst$total$age_mean, 1)` years (SD
+`r num.fn(age.lst$total$age_sd, 1)`).
+
+## Amyloid and tau PET
+
+For each participant, the first PET scan was used. Amyloid is expressed in
+Centiloids, a scale that standardises amyloid PET across tracers and
+pipelines [@klunk2015]; amyloid positivity is a Centiloid value above
+`r pathology$amyloid_cutoff`. Tau is the standardised uptake value ratio
+(SUVR) in a temporal meta-region of interest; tau positivity is a value
+above `r pathology$tau_cutoff`. Both cutoffs and positivity statuses come
+from the data provider. Together they define amyloid/tau (A/T) groups in
+the sense of the NIA-AA research framework [@jack2018].
+
+Only the first scan was used because the question concerns pathology
+status, and most participants have one scan. Of the
+`r analysed_participants` participants in the analysis sample,
+`r pathology$participants` have PET (`r pathology$amyloid_positive`
+amyloid-positive), and `r pathology$with_tau` of them have a tau value
+(`r pathology$tau_positive` tau-positive). One first scan has amyloid but no
+tau, so that participant contributes to the amyloid analyses only.
+
+The A/T groups are A−T− (n = `r at_size.fn("A-T-")`), A+T−
+(n = `r at_size.fn("A+T-")`), A+T+ (n = `r at_size.fn("A+T+")`) and A−T+
+(n = `r at_size.fn("A-T+")`). Tau positivity is rare, which shapes several
+decisions below.
+
+**Timing.** PET was acquired a median of
+`r num.fn(pathology$years_to_pet_median, 1)` years after the first smell
+test, and after the last smell test for
+`r pathology$pet_after_last_upsit` participants. The pathology analyses
+therefore relate smell change to pathology measured later in follow-up;
+they cannot establish whether smell decline precedes pathology.
+
+# Trajectory classes {#sec-classes}
+
+## What the model does
+
+The aim was to find out whether participants fall into groups with
+different patterns of odour identification over time. Latent class
+trajectory models do this. They assume the sample is a mixture of a small
+number of unobserved classes, each with its own mean trajectory, and
+estimate for each participant the probability of belonging to each class
+[@naginodgers2010; @lennon2018].
+
+Two variants exist. In group-based trajectory modelling (GBTM, also called
+latent class growth analysis), everyone in a class follows the class
+trajectory exactly, apart from independent measurement error
+[@naginodgers2010]. In growth mixture modelling (GMM), participants also
+vary around their class trajectory through random effects, as in an
+ordinary mixed model [@muthen1999]. We fitted both and let the data decide
+(Section [-@sec-selection]).
+
+For participant $i$ at assessment $j$, in class $g$, the most general model
+fitted is
+
+$$
+Y_{ij} = \beta_{0g} + \beta_{1g} t_{ij} + \beta_{2g} t_{ij}^2
+  + u_{0i} + u_{1i} t_{ij} + \varepsilon_{ij},
+$$
+
+where $Y_{ij}$ is the UPSIT score and $t_{ij}$ is age, centred at
+`r TRAJ$age_centre` and divided by `r TRAJ$time_divisor` (so coefficients
+are per decade from age `r TRAJ$age_centre`). The class-specific
+coefficients $\beta_{\cdot g}$ define each class's mean trajectory. The
+random intercept $u_{0i}$ and random slope $u_{1i}$ are each participant's
+own deviation in level and rate. They follow a bivariate normal
+distribution with unrestricted correlation, shared across classes, and
+$\varepsilon_{ij}$ is normal measurement error. The quadratic term is
+dropped in linear models; the random effects are dropped (GBTM) or reduced
+to an intercept in simpler models. The probability of each class is
+estimated together with the trajectories.
+
+## Software: `lcmm` rather than `gbmt`
+
+The models were fitted with the `hlme` function of the R package `lcmm`
+[@proustlima2017], which fits both GBTM and GMM by maximum likelihood.
+Its key property here is that it uses each participant's own assessment
+times.
+
+We first tried the R package `gbmt`. It requires every participant to be
+measured at the same time points, because its likelihood compares the
+predicted trajectory with observations on one shared grid. With age as the
+time scale, every participant is tested at different ages, so `gbmt`
+returned invalid fits (identical classes after a single iteration). `lcmm`
+has no such restriction and also allows random effects, which `gbmt` does
+not.
+
+## Time scale: age
+
+Age was chosen as the main time scale because odour identification
+declines with age, and participants entered the study across a wide range
+of ages. On age, a trajectory describes how smell changes over the lifespan
+segment we observe, and participants who entered at different ages
+contribute to different parts of the same curve.
+
+The PI also asked for trajectories on years since the first test, with age
+at the first test as a covariate. They are reported in Section
+[-@sec-years] and agree closely with the classes on age.
+
+## Models compared
+
+We fitted a grid of `r age.lst$n_models` models: 1 to 5 classes, linear or
+quadratic trajectories, and three random-effect structures (none, which is
+the GBTM; a random intercept; a random intercept and slope).
+
+Mixture models can converge to a local rather than the global maximum of
+the likelihood, which gives a poorer solution that looks valid. To guard
+against this, each model with more than one class was started from
+`r age.lst$n_starts` random sets of initial values, generated around the
+one-class estimates. Each start ran for `r TRAJ$gridsearch_maxiter`
+iterations, and the best was then run to convergence (`lcmm::gridsearch`).
+All `r age.lst$n_models` models converged. A first fit with fewer starts
+reached the same selected solution; more starts changed some of the other
+models, so the search is not infallible, and a solution reached by both
+searches is more credible.
+
+## Model selection {#sec-selection}
+
+Models were judged on four criteria together, as recommended for latent
+class trajectory models [@lennon2018; @vandeschoot2017]:
+
+1. The Bayesian information criterion (BIC; lower is better), computed with
+   the number of participants as the sample size.
+2. Class sizes: a class of a handful of participants is not a reliable
+   pattern.
+3. Classification certainty: the mean posterior probability of the assigned
+   class, per class. Values near 1 mean participants are clearly assigned.
+4. Interpretability of the classes.
+
+The full comparison is in @tbl-comparison (Appendix) and @fig-bic. The
+reasoning was as follows.
+
+- **Random effects are needed.** With one class, adding a random
+  intercept and slope lowered the BIC from `r num.fn(bic_none_1, 0)`
+  to `r num.fn(bic_slope_1, 0)`. Without random effects, ordinary differences
+  between people in level and rate can only be represented by adding
+  classes, so GBTM models tend to over-extract classes that are
+  not distinct patterns. GMM separates these two sources of variation.
+- **A lower BIC only through small, uncertain classes.** Of the
+  `r age.lst$n_models` models, `r nrow(lower_bic.dt)` had a lower BIC than
+  the selected one (`r num.fn(selected.dt$bic, 0)`). Each had more classes,
+  a smallest class of `r min(lower_bic.dt$min_class_n)` to
+  `r max(lower_bic.dt$min_class_n)` participants, and less certain
+  classification: lowest mean posterior probability of a class
+  `r num.fn(min(lower_bic.dt$min_appa, na.rm = TRUE))` to
+  `r num.fn(max(lower_bic.dt$min_appa, na.rm = TRUE))`, against
+  `r num.fn(selected.dt$min_appa)` for the selected model. The lowest BIC
+  overall, of `r num.fn(best_bic.dt$bic, 0)`, belongs to a
+  `r tolower(best_bic.dt$degree)` model with `r best_bic.dt$n_classes`
+  classes whose smallest class has
+  `r participants.fn(best_bic.dt$min_class_n)`.
+- **Quadratic over linear.** With 3 classes and the same random effects,
+  the quadratic model had a lower BIC than the linear one
+  (`r num.fn(selected.dt$bic, 0)` against
+  `r num.fn(linear_selected.dt$bic, 0)`), consistent with decline that
+  speeds up with age.
+
+The selected model therefore has `r age.lst$n_classes` classes,
+`r tolower(age.lst$degree)` trajectories and a random intercept and slope.
+Participants were assigned to their most likely class; the mean posterior
+probability of the assigned class was
+`r num.fn(age.lst$posterior_range[1])` to
+`r num.fn(age.lst$posterior_range[2])` across classes, so classification
+uncertainty is small.
+
+## Results
+
+```{r}
+#| label: fig-trajectories
+#| out-width: "100%"
+#| fig-cap: !expr sprintf("**Three patterns of change in odour identification.** Class mean UPSIT by age with 95%% confidence bands, over individual participants coloured by their most likely class (%d participants, %d assessments).", age.lst$participants, age.lst$assessments)
+knitr::include_graphics(age.lst$figure)
+```
+
+Between ages 60 and 80, the predicted mean of the main class
+(`r main.dt$n` participants) fell from `r predicted.fn(main.dt$group, 60)`
+to `r predicted.fn(main.dt$group, 80)` points, with most of the decline
+after 70. The `r tolower(faster.dt$group)` class (`r faster.dt$n`
+participants) started lower and fell from
+`r predicted.fn(faster.dt$group, 60)` to
+`r predicted.fn(faster.dt$group, 80)`. The `r tolower(other.dt$group)`
+class (`r other.dt$n` participants) scored in the range of severe smell
+loss throughout (`r predicted.fn(other.dt$group, 60)` points at 60); with
+so few participants, the shape of its curve should not be interpreted.
+
+The classes did not differ in age at the first test
+(@tbl-classes). The `r tolower(faster.dt$group)` class had fewer women
+(`r pct.fn(faster.dt$n_female, faster.dt$n)` against
+`r pct.fn(main.dt$n_female, main.dt$n)`) and more APOE ε4 carriers
+(`r pct.fn(faster.dt$n_apoe_carrier, faster.dt$n)` against
+`r pct.fn(main.dt$n_apoe_carrier, main.dt$n)`). These differences are
+descriptive; with `r faster.dt$n` participants, they are compatible with
+chance.
+
+```{r}
+#| label: tbl-classes
+#| tbl-cap: "**Characteristics of the trajectory classes.** At the first assessment; participants assigned to their most likely class."
+create_class_table.fn(
+  age.lst$class_table, title = NULL,
+  source_note = "Differences between classes are descriptive."
+) |>
+  style_pdf_table.fn()
+```
+
+## How to describe the classes
+
+Latent classes are a summary of heterogeneity, not proof that distinct
+subpopulations exist. A defensible description is that the data are well
+represented by three trajectory patterns, one of which shows faster
+decline. Class membership is estimated with uncertainty, although here the
+posterior probabilities are high. The smallest class mostly captures
+participants with anosmia, whose scores are near the floor of the test.
+
+## Years since the first test {#sec-years}
+
+**Model.** Time is years since the first test (per decade in the model),
+and age at the first test enters as a covariate, together with its
+interaction with time, with effects shared by all classes. Without it,
+participants who entered the study decades apart in age would partly be
+sorted into classes by their age at entry, rather than by the shape of
+their change. Otherwise the models and the grid are the same as on age.
+
+**Search.** In a first fit with fewer starts per model, some models
+reached a lower likelihood than simpler models nested in them. That
+is impossible at the true maximum, so the search had missed the best
+solution. The grid was re-fitted with `r years.lst$n_starts` starts per
+model. More starts improved some fits but not all: the best start after
+`r TRAJ$gridsearch_maxiter` iterations does not always lead to the best
+solution. A solution the search reaches repeatedly is therefore more
+credible than one found once. All `r years.lst$n_models` models converged.
+
+**Selection.** The rule was the one used on age (@tbl-comparison-years,
+@fig-bic-years).
+
+- **Random slope.** With one class, a random slope on top of the random
+  intercept lowered BIC by `r num.fn(y_slope_gain, 0)`: participants differ
+  in their rate of decline. Models without it can express those
+  differences only as extra classes; the best of them, with
+  `r y_intercept_best.dt$n_classes` classes and a BIC of
+  `r num.fn(y_intercept_best.dt$bic, 0)`, has classes of
+  `r gsub("/", ", ", y_intercept_best.dt$class_pct)`%.
+- **Linear rather than quadratic.** With a random intercept and slope,
+  every quadratic model with 3 or more classes had a class of
+  `r min(y_quad_slope.dt$min_class_n)` to
+  `r max(y_quad_slope.dt$min_class_n)` participants, despite a lower BIC
+  (`r num.fn(min(y_quad_slope.dt$bic), 0)` to
+  `r num.fn(max(y_quad_slope.dt$bic), 0)`). Over the follow-up of this
+  time scale, and with age at entry in the model, curvature is also less
+  expected than over the age range.
+- **Three classes.** The linear models with
+  `r paste(y_empty.dt$n_classes, collapse = " and ")` classes reached the
+  same solution as with `r y_selected.dt$n_classes` classes, with the
+  extra classes empty. The 3-class solution was the same in the first fit
+  and with `r years.lst$n_starts` starts.
+
+The selected model has `r years.lst$n_classes` classes,
+`r tolower(years.lst$degree)` trajectories and a random intercept and slope
+(BIC `r num.fn(years.lst$bic, 0)`). The mean posterior probability of the
+assigned class was `r num.fn(years.lst$posterior_range[1])` to
+`r num.fn(years.lst$posterior_range[2])`.
+
+```{r}
+#| label: fig-trajectories-years
+#| out-width: "100%"
+#| fig-cap: !expr sprintf("**The same three patterns over years since the first test.** Class mean UPSIT with 95%% confidence bands for age %.1f at the first test (the sample mean), over individual participants coloured by their most likely class (%d participants, %d assessments).", years.lst$total$age_mean, years.lst$participants, years.lst$assessments)
+knitr::include_graphics(years.lst$figure)
+```
+
+**Results.** Over 10 years from the first test, the main class
+(`r y_main.dt$n` participants) went from
+`r y_predicted.fn(y_main.dt$group, 0)` to
+`r y_predicted.fn(y_main.dt$group, 10)` points, and the
+`r tolower(y_faster.dt$group)` class (`r y_faster.dt$n` participants) from
+`r y_predicted.fn(y_faster.dt$group, 0)` to
+`r y_predicted.fn(y_faster.dt$group, 10)`. The
+`r tolower(y_other.dt$group)` class (`r y_other.dt$n` participants) scored
+in the range of severe smell loss throughout. The
+`r tolower(y_faster.dt$group)` class was older at the first test than the
+main class (`r num.fn(y_faster.dt$age_mean, 1)` against
+`r num.fn(y_main.dt$age_mean, 1)` years; @tbl-classes-years): age at entry
+is in the model, but its effect is shared by all classes, so class
+membership can still differ by age.
+
+**Agreement with the age classes.** Of the `r analysed_participants`
+participants, `r same_class_n` were in the same class on both time scales
+(@tbl-agreement). Of the `r faster.dt$n` participants in the
+faster-decline class on age, `r agree.fn(compared, y_compared)` were also
+in it on years. The faster-decline class on years is larger
+(`r y_faster.dt$n` participants) because it also takes
+`r agree.fn(main.dt$group, y_compared)` participants from the main class
+on age. The two time scales therefore describe largely the same groups of
+people.
+
+```{r}
+#| label: tbl-classes-years
+#| tbl-cap: "**Characteristics of the trajectory classes on years since the first test.** At the first assessment; participants assigned to their most likely class."
+create_class_table.fn(
+  years.lst$class_table, title = NULL,
+  source_note = "Differences between classes are descriptive."
+) |>
+  style_pdf_table.fn()
+```
+
+```{r}
+#| label: tbl-agreement
+#| tbl-cap: "**Class on age against class on years since the first test.** Number of participants."
+labels.v <- config$trajectories$class_labels$age
+agreement_wide.dt <- dcast(
+  agreement.dt[, .(
+    class_age = factor(class_age, labels.v),
+    class_years = factor(class_years_since_baseline, labels.v), N
+  )],
+  class_age ~ class_years, value.var = "N", fill = 0, drop = FALSE
+)
+gt::gt(agreement_wide.dt, rowname_col = "class_age") |>
+  gt::tab_stubhead("Class on age") |>
+  gt::tab_spanner("Class on years since the first test", labels.v) |>
+  style_screen_table.fn() |>
+  style_pdf_table.fn()
+```
+
+# Pathology and rate of decline {#sec-pathology}
+
+## Why not relate pathology to class membership
+
+The obvious next step, testing whether pathology predicts class
+membership, is not informative here. Only
+`r class_path.dt[group == compared, n_pet]` participants of the
+`r tolower(compared)` class have PET, so a test would have low power to
+detect a difference of the size observed, and a non-significant result
+would be uninterpretable. Classes also discard information: they reduce
+each participant's trajectory to a label. We therefore asked the question
+directly, with mixed models of the rate of change in all participants with
+PET, and describe pathology by class without tests (Section
+[-@sec-class-pathology]).
+
+## Model
+
+For each PET marker, a linear mixed model estimated each participant's
+starting score and yearly change, and whether they differ by the marker:
+
+$$
+Y_{ij} = \beta_0 + \beta_1 s_{ij} + \beta_2 M_i + \beta_3 M_i s_{ij}
+  + \boldsymbol{\gamma}^\top \mathbf{X}_i
+  + \boldsymbol{\delta}^\top \mathbf{X}_i s_{ij}
+  + u_{0i} + u_{1i} s_{ij} + \varepsilon_{ij},
+$$
+
+where $s_{ij}$ is years since the first test, $M_i$ is the marker,
+$\mathbf{X}_i$ the covariates, and $u_{0i}, u_{1i}$ a random intercept and
+slope per participant with unrestricted correlation. $\beta_3$ is the
+difference in points per year associated with the marker, the quantity of
+interest; $\beta_2$ is the difference at the first test. The models were
+fitted by maximum likelihood with `lcmm::hlme` with a single class, which is
+an ordinary linear mixed model; results were checked against `nlme::lme`
+and were identical. Confidence intervals and p-values are Wald-based.
+
+**Time scale.** Years since the first test, so that $\beta_1$ and
+$\beta_3$ are directly in points per year. Age enters as a covariate.
+
+**Covariates.** Age at the first test and sex, each with its interaction
+with time, because both are related to smell and to amyloid and could
+otherwise confound the association. Age at the first test was centred at
+`r TRAJ$age_centre` and sex at the sample mean, so reference slopes are
+for a participant aged `r TRAJ$age_centre` at the first test with the
+sample's average sex balance. APOE ε4 and education were not in the main
+models. APOE ε4 is a cause of amyloid accumulation, so adjusting for it
+would remove part of the association of interest. Both were added in a
+sensitivity analysis.
+
+**Markers and separate models.** Four markers were modelled, each in its
+own model: amyloid positivity, tau positivity, Centiloid (per
+`r pathology$centiloid_step` Centiloids above
+`r pathology$amyloid_cutoff`) and tau SUVR (per `r pathology$tau_step`
+above `r pathology$tau_cutoff`). Amyloid and tau were not entered together
+or with their interaction because tau positivity is rare and largely
+overlaps amyloid positivity: the A−T+ and A+T+ cells have
+`r at_size.fn("A-T+")` and `r at_size.fn("A+T+")` participants, too few to
+separate the effects of tau and amyloid. Continuous markers use all the
+information in the measure but assume a linear relation.
+
+**A/T groups.** A separate model gave each of A−T−, A+T− and A+T+ its own
+slope (`r at_modelled_n` participants). The A−T+ group
+(n = `r at_size.fn("A-T+")`) was too small to estimate a slope and is not
+shown, nor is the participant without tau.
+
+**Missing PET.** Participants without PET are not in these models. The
+models assume these PET data are missing at random given the covariates,
+which cannot be checked with the data at hand.
+
+## Results
+
+```{r}
+#| label: fig-pathology
+#| out-width: "100%"
+#| fig-cap: !expr sprintf("**Faster decline with amyloid and tau.** Predicted UPSIT over years since the first test, with 95%% confidence bands, for a participant aged %g at the first test with average sex (%d participants with PET).", TRAJ$age_centre, pathology$participants)
+knitr::include_graphics(pathology$figure)
+```
+
+Amyloid-positive participants lost
+`r loss_ci.fn(pathology$amyloid$positive)` points per year, against
+`r loss_ci.fn(pathology$amyloid$negative)` for amyloid-negative
+participants, a difference of `r loss_ci.fn(pathology$amyloid$difference)`
+points per year. Tau-positive participants lost
+`r loss_ci.fn(pathology$tau$positive)` points per year against
+`r loss_ci.fn(pathology$tau$negative)`, a difference of
+`r loss_ci.fn(pathology$tau$difference)`; with
+`r pathology$tau_positive` tau-positive participants, this estimate is
+imprecise. Each additional `r pathology$centiloid_step` Centiloids was
+associated with `r loss_ci.fn(pathology$amyloid$per_step)` more points
+lost per year, and each additional `r pathology$tau_step` SUVR with
+`r loss_ci.fn(pathology$tau$per_step)`.
+
+By A/T group, participants lost `r loss_ci.fn(at.fn("A-T-"))` points per
+year with neither, `r loss_ci.fn(at.fn("A+T-"))` with amyloid alone and
+`r loss_ci.fn(at.fn("A+T+"))` with both (@fig-pathology, @tbl-pathology).
+The A+T+ estimate rests on `r at.fn("A+T+")$participants` participants.
+
+Scores at the first test did not differ by amyloid (difference
+`r est_ci.fn(pathology$amyloid$baseline)` points) or tau
+(`r est_ci.fn(pathology$tau$baseline)`). The association is with the rate
+of change, not with a single score. Adding APOE ε4 and education changed
+the differences in slope little: `r loss.fn(pathology$amyloid$sensitivity)`
+points per year for amyloid (`r loss.fn(pathology$amyloid$difference)` in
+the main model) and `r loss.fn(pathology$tau$sensitivity)` for tau
+(`r loss.fn(pathology$tau$difference)`).
+
+```{r}
+#| label: tbl-pathology
+#| tbl-cap: "**UPSIT change per year by amyloid and tau.** Linear mixed models adjusted for age at the first test and sex; also adjusted adds APOE ε4 carrier status and education."
+create_pathology_table.fn(
+  pathology$table,
+  column_labels.lst = list(
+    slope = "Change per year [95% CI]",
+    difference = "Difference [95% CI]",
+    p = "p",
+    difference_sensitivity = "Also adjusted [95% CI]"
+  ),
+  title = NULL,
+  source_note = "Negative values are points lost per year."
+) |>
+  style_pdf_table.fn()
+```
+
+# Pathology by trajectory class {#sec-class-pathology}
+
+@tbl-class-pathology describes PET in each class. In the
+`r tolower(compared)` class, `r amyloid_pct.fn(compared)` of participants
+with PET were amyloid-positive, against `r amyloid_pct.fn(main.dt$group)`
+in the main class. The difference is given with an approximate (Wald) 95%
+confidence interval, which is wide. No p-values are reported: with so few
+participants a test would have low power, and a non-significant result
+could be misread as evidence of no difference. Tau positivity was rare in
+every class.
+
+On years since the first test (@tbl-class-pathology-years), the picture
+was similar: `r y_amyloid_pct.fn(y_compared)` amyloid-positive in the
+`r tolower(y_compared)` class against `r y_amyloid_pct.fn(y_main.dt$group)`
+in the main class, and `r y_tau_pct.fn(y_compared)` tau-positive against
+`r y_tau_pct.fn(y_main.dt$group)`, with
+`r y_class_path.dt[group == y_compared, n_pet]` participants with PET in
+that class.
+
+```{r}
+#| label: tbl-class-pathology
+#| tbl-cap: "**Amyloid and tau PET by trajectory class.** First PET scan; descriptive only."
+# Shorter row labels so the table fits the page width
+class_path_table.dt <- copy(class_pathology$age$table)[
+  , characteristic := gsub(
+    ", difference from Main, percentage points", ", difference",
+    sub(" (% of those with tau)", " (%)",
+        sub(" (% of participants)", " (%)", characteristic, fixed = TRUE),
+        fixed = TRUE)
+  )
+]
+create_class_table.fn(
+  class_path_table.dt, title = NULL,
+  source_note = paste(
+    "Differences from the main class are in percentage points with",
+    "approximate (Wald) 95% confidence intervals. Tau percentages are of",
+    "participants with tau."
+  )
+) |>
+  style_pdf_table.fn()
+```
+
+```{r}
+#| label: tbl-class-pathology-years
+#| tbl-cap: "**Amyloid and tau PET by trajectory class on years since the first test.** First PET scan; descriptive only."
+y_class_path_table.dt <- copy(class_pathology$years_since_baseline$table)[
+  , characteristic := class_path_table.dt$characteristic
+]
+create_class_table.fn(
+  y_class_path_table.dt, title = NULL,
+  source_note = paste(
+    "Differences from the main class are in percentage points with",
+    "approximate (Wald) 95% confidence intervals. Tau percentages are of",
+    "participants with tau."
+  )
+) |>
+  style_pdf_table.fn()
+```
+
+# Questions to expect
+
+**Why a latent class model at all?** To describe heterogeneity in change
+without imposing groups in advance. It shows that a minority declines
+faster, which a single mixed model would average away.
+
+**Why not the model with the lowest BIC?** BIC is one criterion among
+several. On age, every model with a lower BIC than the selected one got
+there by adding classes of `r min(lower_bic.dt$min_class_n)` to
+`r max(lower_bic.dt$min_class_n)` participants, with less certain
+classification; the lowest BIC belongs to a model whose smallest class has
+`r participants.fn(best_bic.dt$min_class_n)`. Classes that small are not
+reliable patterns.
+
+**Why include random effects, when GBTM is the classic approach?** Without
+them, between-person differences in level and rate are forced into extra
+classes. Including them improved the fit markedly and gave fewer, clearer
+classes.
+
+**Could the search have missed a better solution?** For some models, yes:
+on both time scales, going from a first fit with fewer starts to
+`r age.lst$n_starts` starts per model changed some fits. The selected
+models, however, were reached by both searches, so they are not artefacts
+of one unlucky search. All models converged.
+
+**Why two time scales, and do they disagree?** Age describes change over
+the lifespan; years since the first test describes change within
+follow-up, with age at entry as a covariate, which is closer to how a
+clinical cohort is followed. Both found the same three patterns, and
+`r same_class_n` of `r analysed_participants` participants were classified
+the same way.
+
+**Why is the years model linear when the age model is quadratic?** Model
+selection followed the same rule on both. On years, the quadratic models
+with 3 or more classes all had a class of 2 to 3 participants.
+
+**Why are the pathology results not from the classes?** Too few
+participants in the small classes have PET to test class differences
+meaningfully. The mixed models use all participants with PET and the full
+information in each trajectory.
+
+**Why not adjust for APOE ε4?** APOE ε4 acts largely through amyloid, so it
+is on the causal path. The sensitivity analysis shows the results hold when
+it is added.
+
+**Why separate amyloid and tau models?** Tau positivity is rare and mostly
+occurs with amyloid, so a joint model cannot separate them. The A/T model
+shows the combined picture.
+
+**Does smell decline precede pathology?** These data cannot say. PET was
+measured once, years after the first smell test.
+
+**Were multiple comparisons corrected?** No. The markers are correlated
+measures of the same process, the analyses are exploratory, and estimates
+are reported with confidence intervals rather than as a set of tests.
+
+# Limitations
+
+- PET was measured once, a median of
+  `r num.fn(pathology$years_to_pet_median, 1)` years after the first smell
+  test; temporal order cannot be established.
+- Tau positivity was rare (`r pathology$tau_positive` participants), so
+  tau and A+T+ estimates are imprecise.
+- The pathology models assume a linear decline over follow-up, whereas the
+  age trajectories suggest decline accelerates with age. Age at the first
+  test as a covariate partly accounts for this.
+- Both model families assume normally distributed errors. UPSIT scores
+  bunch near the top of the scale in healthy participants and near the
+  bottom in anosmia, which these models handle only approximately. `lcmm`
+  can fit models with non-linear links to the scale (`lcmm::lcmm`), a
+  possible sensitivity analysis.
+- Mixture-model searches can miss the best solution. The comparison tables
+  show the best solution found for each model with
+  `r age.lst$n_starts` starts, not a guaranteed optimum; the selected
+  models were reached by two independent searches.
+
+# Reporting
+
+The GRoLTS checklist [@vandeschoot2017] lists what a paper using latent
+trajectory models should report. This document covers the main items: the
+software and estimation method, the time scale, the random-effect
+structure, the number of random starts, the models compared, the selection
+criteria and fit statistics of every model (@tbl-comparison), class sizes,
+posterior probabilities, and plots of the estimated trajectories with the
+observed data.
+
+# References {.unnumbered}
+
+::: {#refs}
+:::
+
+{{< pagebreak >}}
+
+# Appendix: model comparison {.unnumbered}
+
+```{r}
+#| label: fig-bic
+#| out-width: "100%"
+#| fig-cap: !expr sprintf("**Choosing the number of trajectory classes.** BIC of the %d fitted models by number of classes; the circle marks the selected model.", age.lst$n_models)
+knitr::include_graphics(age.lst$bic_figure)
+```
+
+```{r}
+#| label: tbl-comparison
+#| tbl-cap: "**All fitted trajectory models on age.** BIC uses the number of participants. Posterior: lowest per-class mean posterior probability of the assigned class (missing when a class is empty)."
+comparison_display.fn <- function(comparison.dt) comparison.dt[
+  order(degree, random, n_classes),
+  .(
+    model = sprintf("%s, %s", degree, tolower(random)),
+    n_classes,
+    bic = num.fn(bic, 1),
+    class_pct = gsub("/", " / ", class_pct),
+    min_class_n,
+    min_appa = ifelse(is.nan(min_appa), "–", num.fn(min_appa)),
+    selected = ifelse(selected, "Selected", "")
+  )
+]
+comparison_table.fn <- function(comparison.dt) {
+  gt::gt(comparison_display.fn(comparison.dt), groupname_col = "model") |>
+    gt::cols_label(
+      n_classes = "Classes", bic = "BIC", class_pct = "Class sizes, %",
+      min_class_n = "Smallest class, n", min_appa = "Posterior",
+      selected = ""
+    ) |>
+    style_screen_table.fn() |>
+    style_pdf_table.fn()
+}
+comparison_table.fn(comparison.dt)
+```
+
+```{r}
+#| label: fig-bic-years
+#| out-width: "100%"
+#| fig-cap: !expr sprintf("**Choosing the number of classes on years since the first test.** BIC of the %d fitted models; the circle marks the selected model.", years.lst$n_models)
+knitr::include_graphics(years.lst$bic_figure)
+```
+
+```{r}
+#| label: tbl-comparison-years
+#| tbl-cap: "**All fitted trajectory models on years since the first test.** Columns as for age."
+comparison_table.fn(y_comparison.dt)
+```

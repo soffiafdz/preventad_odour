@@ -1,0 +1,348 @@
+# =============================================================================
+# Pipeline configuration: every path and analysis parameter lives here
+# =============================================================================
+
+general:
+  project_name: preventad_odour
+  random_seed: 1618
+
+# Every input and output file, relative to the project root.
+# Raw files are read through links with these plain names; the files they
+# point to, as released, are listed in data/RAW_FILES.md (not tracked).
+data:
+  raw:
+    # Internal exports, one row per visit or participant, as received
+    smell_csv: data/raw/smell.csv
+    demographics_csv: data/raw/demographics.csv
+    genetics_csv: data/raw/genetics.csv
+    rbans_csv: data/raw/rbans.csv
+    # One row per MCI review; participants never diagnosed are not listed
+    mci_csv: data/raw/mci.csv
+    # Corrected release: in the first one the tau meta-ROI was taken from the
+    # amyloid (NAV) scan
+    pet_csv: data/raw/pet.csv
+  external:
+    # Dates confirmed by the data provider on 2026-10-06
+    smell_date_corrections: data/external/smell_date_corrections.csv
+  derivatives:
+    smell: data/derivatives/smell.rds
+    pet: data/derivatives/pet.rds
+    rbans: data/derivatives/rbans.rds
+    # Class assignment per participant, by trajectories.time_scales
+    trajectory_classes:
+      age: data/derivatives/trajectory_classes.rds
+      years_since_baseline: data/derivatives/trajectory_classes_years.rds
+  # Model results and outputs, by trajectories.time_scales
+  models:
+    upsit_trajectories:
+      age: models/results/upsit_trajectories.rds
+      years_since_baseline: models/results/upsit_trajectories_years.rds
+    trajectory_description:
+      age: models/results/trajectory_description.rds
+      years_since_baseline: models/results/trajectory_description_years.rds
+    pathology_slopes: models/results/pathology_slopes.rds
+    rbans_baseline: models/results/rbans_baseline.rds
+    rbans_change: models/results/rbans_change.rds
+    mci_progression: models/results/mci_progression.rds
+    rbans_mci_description: models/results/rbans_mci_description.rds
+    slope_coupling: models/results/slope_coupling.rds
+    class_characteristics: models/results/class_characteristics.rds
+    class_cognition: models/results/class_cognition.rds
+    upsit_modifiers: models/results/upsit_modifiers.rds
+    pathology_description: models/results/pathology_description.rds
+    class_pathology:
+      age: models/results/class_pathology.rds
+      years_since_baseline: models/results/class_pathology_years.rds
+  outputs:
+    trajectory_figure:
+      age: outputs/figures/upsit_class_trajectories
+      years_since_baseline: outputs/figures/upsit_class_trajectories_years
+    # Slide versions: no title or caption, larger text, PNG only
+    trajectory_slide_figure:
+      age: outputs/figures/upsit_class_trajectories_slide
+      years_since_baseline: outputs/figures/upsit_class_trajectories_years_slide
+    bic_figure:
+      age: outputs/figures/trajectory_model_bic
+      years_since_baseline: outputs/figures/trajectory_model_bic_years
+    class_table:
+      age: outputs/tables/trajectory_classes
+      years_since_baseline: outputs/tables/trajectory_classes_years
+    pathology_figure: outputs/figures/upsit_pathology_slopes
+    pathology_slide_figure: outputs/figures/upsit_pathology_slopes_slide
+    pathology_table: outputs/tables/upsit_pathology_slopes
+    # Delayed memory by baseline UPSIT (12) and MCI by baseline UPSIT (13)
+    memory_figure: outputs/figures/delayed_memory_by_upsit
+    memory_slide_figure: outputs/figures/delayed_memory_by_upsit_slide
+    mci_figure: outputs/figures/mci_by_upsit
+    mci_slide_figure: outputs/figures/mci_by_upsit_slide
+    # Who is in each trajectory class, and the smell sample (15)
+    class_profile_figure: outputs/figures/class_profile
+    class_profile_slide_figure: outputs/figures/class_profile_slide
+    class_at_figure: outputs/figures/class_at_groups
+    class_at_slide_figure: outputs/figures/class_at_groups_slide
+    class_diagnosis_figure: outputs/figures/class_olfactory_diagnosis
+    class_diagnosis_slide_figure: outputs/figures/class_olfactory_diagnosis_slide
+    sample_figure: outputs/figures/upsit_sample
+    sample_slide_figure: outputs/figures/upsit_sample_slide
+    # Delayed memory over time by trajectory class (16)
+    class_memory_figure: outputs/figures/class_delayed_memory
+    class_memory_slide_figure: outputs/figures/class_delayed_memory_slide
+    # UPSIT over time by amyloid and progression to MCI (17)
+    progression_figure: outputs/figures/upsit_amyloid_progression
+    progression_slide_figure: outputs/figures/upsit_amyloid_progression_slide
+    # Each person's yearly change in UPSIT and delayed memory (11)
+    coupling_figure: outputs/figures/upsit_memory_slopes
+    coupling_slide_figure: outputs/figures/upsit_memory_slopes_slide
+    rbans_mci_table: outputs/tables/rbans_mci_by_upsit
+    # Every number the summary report and slides use (08)
+    summary_env: outputs/summary_env.rds
+    class_pathology_table:
+      age: outputs/tables/trajectory_classes_pathology
+      years_since_baseline: outputs/tables/trajectory_classes_pathology_years
+
+parameters:
+  smell:
+    id_col: PSCID
+    date_col: Date_taken
+    # Age at the visit in months; 01 stores it in years as age_col
+    raw_age_col: Candidate_Age
+    age_col: age
+    score_col: UPSIT_total_score
+    # Only used to match the date corrections
+    visit_col: Visit_label
+    other_cols: [Study_visit_label]
+    # From the demographics export
+    sex_col: Sex
+    female_value: Female
+    education_col: Education_years
+    # From the genetics export: the two alleles as digits separated by a
+    # space ("4 3"). APOE has three common alleles, e2, e3 and e4.
+    apoe_genotype_col: APOE
+    # Derived in 01: 1 = at least one e4 allele
+    apoe_col: apoe_e4
+    apoe_carrier_value: 1
+    # 40 items, one point each (Doty, Shaman & Dann 1984,
+    # doi:10.1016/0031-9384(84)90269-5)
+    score_range: [0, 40]
+    # Scores recorded as this are missing: 40 four-choice items give about
+    # 10 by chance, the next lowest score in the export is 7, and these
+    # visits have no olfactory diagnosis (decided 2026-10-08)
+    missing_score: 0
+    # Olfactory diagnosis from the UPSIT norms, as exported (normosmia, mild,
+    # moderate or severe microsmia, total anosmia)
+    diagnosis_col: diagnosis
+  rbans:
+    id_col: PSCID
+    date_col: Date_taken
+    # Age at the visit in months; 09 stores it in years as age_col
+    raw_age_col: Candidate_Age
+    age_col: age
+    # Matches RBANS visits to UPSIT assessments
+    visit_col: Study_visit_label
+    # Alternate forms of the test (data provider, 2026-10-08)
+    version_col: RBANS_version
+    versions: [A, B, C, D]
+    # Index scores from the 60-69 norms for every participant, so not
+    # adjusted for age (data provider, 2026-10-08)
+    score_cols:
+      - total_scale_index_score_60_69
+      - immediate_memory_index_score_60_69
+      - delayed_memory_index_score_60_69
+  rbans_baseline:
+    # RBANS at the visit of each participant's first UPSIT (same
+    # Study_visit_label; in this release, the same day for at least 95%)
+    upsit_step: 5
+    # Age is (age - trajectories.age_centre) / trajectories.time_divisor.
+    # The sensitivity model adds APOE e4.
+    covariates: [age_first, female, education]
+    sensitivity_covariates: [apoe_carrier]
+  rbans_change:
+    # Same participants and baseline as rbans_baseline, and its UPSIT step.
+    # Each covariate also has its own interaction with time; age as in
+    # rbans_baseline, the others centred at their sample means.
+    covariates: [age_first, female, education]
+    sensitivity_covariates: [apoe_carrier]
+  mci:
+    id_col: PSCID
+    # Visit at which MCI was first diagnosed; the same on every review of a
+    # participant
+    diagnosis_date_col: initial_MCI_visit_date
+    review_date_col: MCI_review_visit_date
+    # 1 amnestic single domain, 2 amnestic multiple domain, 3 non-amnestic,
+    # 9 reverted to normal (data provider). Participants with a review
+    # coded as reverted are excluded from the MCI analyses.
+    subtype_col: MCI_subtype
+    reverted_value: 9
+  mci_progression:
+    # Participants and baseline as rbans_baseline, and its UPSIT step.
+    # Follow-up ends at the first MCI visit or, without MCI, at the earlier
+    # of the last RBANS visit and the latest review in the MCI export. The
+    # latest review stands in for the end of the export's coverage until
+    # the data provider confirms it (decided 2026-10-08)
+    covariates: [age_first, female, education]
+    sensitivity_covariates: [apoe_carrier]
+    # Absolute risks are read at this follow-up time, while about half the
+    # sample is still at risk (160 of 348 and 45 of 59 cases by then,
+    # 2026-10-08); later times rest on few people
+    horizon_years: 8
+  amyloid_adjustment:
+    # H4: rbans_change and mci_progression refitted on the participants with
+    # PET, without and then with amyloid status at the first scan
+    # (pet.amyloid_cutoff), so that a change in the UPSIT estimate is not a
+    # change of sample. The first scan is a median of about 5 years after the
+    # first UPSIT.
+    covariate: amyloid_positive
+  class_characteristics:
+    # Classes described on this time scale (trajectories.time_scales)
+    time_scale: age
+  class_cognition:
+    # Delayed memory at the first UPSIT and over time by trajectory class
+    # (classes from class_characteristics.time_scale), against the largest
+    # class; participants, baseline and adjustment as rbans_change
+    covariates: [age_first, female, education]
+  upsit_modifiers:
+    # UPSIT over years since the first test in the trajectory sample: APOE
+    # e4 and sex, each with its interaction with time, adjusted for age at
+    # the first test (and its interaction with time)
+    modifiers: [apoe_carrier, female]
+    covariates: [age_first]
+    # Amyloid by progression to MCI, in people with PET: four groups, each
+    # with its own slope, adjusted for age at the first test and sex
+    progression_covariates: [age_first, female]
+  slope_coupling:
+    # Time is years since each participant's first UPSIT for both outcomes.
+    # Each outcome has its own fixed effects for these, with age as in
+    # rbans_baseline
+    covariates: [age_first, female, education]
+    # Participants resampled with replacement; percentile 95% intervals.
+    # nlme's own intervals for the correlations failed for some scores
+    # (approximate covariance not positive definite, 2026-10-08)
+    bootstrap_reps: 1000
+    # Bootstrap refits run on this many cores (parallel::mclapply with the
+    # L'Ecuyer-CMRG generator, seeded with general.random_seed)
+    bootstrap_cores: 8
+  pet:
+    id_col: PSCID
+    session_col: visit_number
+    date_col: scan_first_visit
+    amyloid_col: WhlCbl_centiloid
+    tau_col: thresh_meta_roi_bilat
+    amyloid_status_col: PET_AMY_STATUS
+    tau_status_col: PET_TAU_STATUS
+    # Positivity as defined by the data provider: Centiloid > 20 and tau
+    # meta-ROI SUVR > 1.29
+    amyloid_cutoff: 20
+    tau_cutoff: 1.29
+  pathology:
+    # Time is years since the first UPSIT, so slopes are points per year.
+    # Continuous measures are centred at their positivity cutoffs and
+    # expressed per 10 Centiloids and per 0.1 SUVR.
+    centiloid_step: 10
+    tau_step: 0.1
+    # One model per marker: tau positivity is too rare in this sample (16 of
+    # 222 with tau) to model amyloid and tau jointly or with an A x T
+    # interaction. The binary tau model rests on those 16 and is low-powered.
+    markers: [amyloid_positive, tau_positive, centiloid, tau_suvr]
+    # A/T groups given their own slopes, the first being the reference;
+    # A-T+ (6 participants) is too small and left out
+    at_groups: [A-T-, A+T-, A+T+]
+    # Main models adjust for these; the sensitivity models add the second
+    # set. APOE e4 drives amyloid, so adjusting for it in the main model
+    # would remove part of the association being estimated.
+    covariates: [age_first, female]
+    sensitivity_covariates: [apoe_carrier, education]
+  trajectories:
+    # Time axes the pipeline produces: age, and years since the first
+    # included assessment with age at that assessment as a covariate (main
+    # effect and interaction with time, common to all classes). Each has its
+    # own result files.
+    time_scales: [age, years_since_baseline]
+    # Age is entered as (age - 65) / 10: centring keeps intercepts
+    # interpretable and scaling avoids numerical problems in quadratic
+    # terms (Proust-Lima et al. 2017, doi:10.18637/jss.v078.i02, section 6.1).
+    # Years since baseline are also divided by 10, so effects are per decade.
+    age_centre: 65
+    time_divisor: 10
+    # The INTREPAD 3-month retest: only trial participants have it, during
+    # treatment, so its practice effect would differ between cohorts
+    exclude_col: Study_visit_label
+    exclude_values: [NAPFU03]
+    # 3 gives the same classes (2026-10-06 run); kept as a sensitivity setting
+    min_assessments: 2
+    degrees: [1, 2]
+    # Within-class random effects: none (classes only), intercept, or
+    # intercept and slope on time
+    random_effects: [none, intercept, slope]
+    n_classes: [1, 5]
+    # Random starts and iterations per start, as in the lcmm hlme article
+    # (cecileproust-lima.github.io/lcmm). On years since baseline, 100
+    # starts missed the best solution for two larger models (2026-10-06), so
+    # that scale uses more.
+    gridsearch_rep:
+      age: 300
+      years_since_baseline: 300
+    gridsearch_maxiter: 30
+    # Random starts run on this many cores (a parallel cluster passed to
+    # lcmm::gridsearch, seeded with general.random_seed); results are
+    # reproducible for a given number of cores
+    gridsearch_cores: 8
+    selected_model:
+      # Chosen on 2026-10-06; confirmed on 2026-10-09 after the two UPSIT
+      # scores of 0 were dropped (300 starts). The 6 models with lower BIC
+      # have 4 or 5 classes, each with a class of 4-5 participants and less
+      # certain classification (minimum average posterior probability
+      # 0.76-0.89, against 0.93).
+      age: d2_slope_g3
+      # Chosen on 2026-10-07 by the rule used on age; confirmed on
+      # 2026-10-09 after the two UPSIT scores of 0 were dropped (300
+      # starts). A random slope lowers the one-class BIC by 101: participants
+      # differ in rate of decline, which intercept-only models can express
+      # only as extra classes. Within the random intercept and slope family,
+      # the 4- and 5-class models classify less certainly (minimum average
+      # posterior probability 0.82-0.86, against 0.95) or have an empty
+      # class; the quadratic 3-class model finds the same classes with a
+      # BIC 0.8 lower, so the linear one is kept.
+      # "pending" instead of a model name makes 03, 07 and 08 skip a scale
+      years_since_baseline: d1_slope_g3
+    # In order of predicted score at the centring age or at baseline,
+    # highest first
+    class_labels:
+      age: [Main, Faster decline, Floor]
+      years_since_baseline: [Main, Faster decline, Floor]
+    # Class compared with the main (largest) class in the class-pathology
+    # table; only a class with enough participants for a usable interval
+    pathology_comparison_class:
+      age: Faster decline
+      years_since_baseline: Faster decline
+
+output:
+  figure_format: [pdf, png]
+  dpi: 600
+  # Width and height in inches, and base font size, for 16:9 slides
+  figure_size: [10, 6]
+  base_size: 12
+  # Slide versions of figures, PNG only: no title or caption (the slide
+  # heading carries them), as wide as the space under a slide title
+  slide_figure_size: [13.33, 5.8]
+  slide_base_size: 21
+  table_formats: [html]
+
+scripts:
+  force_regenerate:
+    extract_smell: false
+    fit_trajectories: false
+    describe_trajectories: false
+    extract_pet: false
+    extract_rbans: false
+    fit_rbans_baseline: false
+    fit_rbans_change: false
+    fit_mci_progression: false
+    describe_rbans_mci: false
+    describe_class_characteristics: false
+    fit_class_cognition: false
+    fit_upsit_modifiers: false
+    fit_slope_coupling: false
+    fit_pathology_slopes: false
+    describe_pathology: false
+    describe_class_pathology: false
+    build_summary_env: false

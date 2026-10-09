@@ -1,0 +1,54 @@
+# --- Data and generated results (never tracked) ---
+/data/
+/models/
+/outputs/
+/logs/
+/archive/
+/submission/
+
+# Data formats anywhere, as a second line of defence
+*.csv
+*.tsv
+*.sas7bdat
+*.sas7bcat
+*.xpt
+*.sav
+*.dta
+*.xls
+*.xlsx
+*.rds
+*.RData
+*.rda
+*.parquet
+*.feather
+*.fst
+*.zip
+*.tar
+*.tar.gz
+*.tar.zst
+*.nii
+*.nii.gz
+
+# --- R ---
+.Rhistory
+.Rapp.history
+.Ruserdata
+.Rproj.user/
+*.Rcheck/
+renv/library/
+renv/staging/
+renv/local/
+
+# --- Quarto / LaTeX ---
+_freeze/
+*_cache/
+/.quarto/
+*.tex
+!reports-src/title.tex
+
+# --- Personal / machine-local ---
+.envrc
+.Renviron
+/*.pdf
+/*.png
+/*.svg

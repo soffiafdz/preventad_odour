@@ -1,0 +1,25 @@
+name: preventad_odour
+channels:
+  - conda-forge
+dependencies:
+  # R itself is pinned here; R packages are pinned by renv (renv.lock)
+  - r-base=4.6.1
+  - quarto=1.9
+  # toolchain + system libraries for compiling R packages from source
+  - compilers
+  - make
+  - pkg-config
+  - cmake
+  - libcurl
+  - openssl
+  - libxml2
+  - zlib
+  - libiconv
+  - fontconfig
+  - freetype
+  - harfbuzz
+  - fribidi
+  - libpng
+  - libjpeg-turbo
+  - libtiff
+  - libwebp

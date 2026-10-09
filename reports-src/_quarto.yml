@@ -1,0 +1,33 @@
+project:
+  output-dir: ../outputs/reports
+  execute-dir: project
+  render: [summary.qmd, slides.qmd, slides-pptx.qmd]
+
+execute:
+  echo: false
+  warning: false
+  message: false
+
+format:
+  pdf:
+    pdf-engine: xelatex
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    geometry: margin=2.2cm
+    fontsize: 10pt
+    # Libertinus ships with TeX Live, so it works on Linux and HPC, and it
+    # has Greek (APOE ε4, η²); LaTeX's default font prints a blank instead
+    mainfont: LibertinusSerif
+    mainfontoptions:
+      - Extension=.otf
+      - UprightFont=*-Regular
+      - BoldFont=*-Bold
+      - ItalicFont=*-Italic
+      - BoldItalicFont=*-BoldItalic
+    sansfont: LibertinusSans
+    sansfontoptions:
+      - Extension=.otf
+      - UprightFont=*-Regular
+      - BoldFont=*-Bold
+      - ItalicFont=*-Italic
