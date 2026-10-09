@@ -52,6 +52,11 @@ res.fn <- function(x, null = 0, with_p = FALSE) {
   if (with_p) text <- paste0(text, ", ", p.fn(x$p))
   bold.fn(text, x, null)
 }
+# Raw memory results are per upsit_step points higher; the slides read them
+# per points lower, as 08 does for per_lower
+flip.fn <- function(x) {
+  list(estimate = -x$estimate, lower = -x$upper, upper = -x$lower, p = x$p)
+}
 # The same for a change reported as a loss (sign flipped)
 loss_res.fn <- function(x, with_p = FALSE) {
   text <- paste(loss.fn(x), loss_ci.fn(x))
@@ -221,6 +226,13 @@ SD `r num.fn(total.dt$education_sd, 1)`
 [Cognitively unimpaired adults with a family history of Alzheimer's disease.
 **Bold** results: the 95% CI excludes no effect.]{.small}
 
+::: {.notes}
+The top row describes the `r total.dt$n` people with two or more smell
+tests, at their first test. The bottom row is the sample of each analysis.
+They overlap; the memory and MCI analyses also include people with a single
+smell test, which is why they are larger.
+:::
+
 ## `r big.fn(cx$n$tests)` smell tests, with a pause from `r min(pause.v)` to `r max(pause.v)` {data-eyebrow="Who took part"}
 
 ```{r}
@@ -230,8 +242,9 @@ knitr::include_graphics(cx$sample_slide_figure)
 ```
 
 ::: {.notes}
-Smell testing stopped during the COVID-19 period and restarted in
-`r max(pause.v) + 1`.
+Both panels count the trajectory sample: people with two or more smell
+tests, without the INTREPAD 3-month retest. Smell testing stopped during the
+COVID-19 period and restarted in `r max(pause.v) + 1`.
 :::
 
 # Does everyone's sense of smell change the same way? {.divider data-eyebrow="Part 1 · Smell trajectories"}
@@ -256,9 +269,8 @@ or intercept and slope. Selected: `r tolower(age.lst$degree)`, random
 intercept and slope (one covariance across classes), by BIC, mean posterior
 probability (`r num.fn(age.lst$posterior_range[1])` to
 `r num.fn(age.lst$posterior_range[2])`) and class size. Age as
-(age − `r traj$age_centre`) / `r traj$time_divisor`. On years: age at the
-first test and age × time common to all classes; `r years.lst$n_classes`
-classes, `r tolower(years.lst$degree)`. INTREPAD 3-month retest left out.
+(age − `r traj$age_centre`) / `r traj$time_divisor`. INTREPAD 3-month retest
+left out.
 :::
 
 ## Most people keep high smell scores; one in `r round(age.lst$participants / faster.dt$n)` declines faster {data-eyebrow="Part 1 · Smell trajectories"}
@@ -269,6 +281,19 @@ classes, `r tolower(years.lst$degree)`. INTREPAD 3-month retest left out.
 knitr::include_graphics(age.lst$slide_figure)
 ```
 
+::: {.notes}
+Thick lines: each group's average curve with its 95% band. Faint lines: each
+person, in their group's colour.
+
+Each person is placed in the group they most probably belong to; the
+average probability of that placement is `r num.fn(classes.dt[group == main.dt$group, posterior_mean])`
+in the main group, `r num.fn(faster.dt$posterior_mean)` in the faster-decline
+group and `r num.fn(other.dt$posterior_mean)` in the floor group.
+
+The floor group (`r other.dt$n` people) is not declining fast: it scores near
+the bottom of the scale from the first test.
+:::
+
 ## The same groups over years of follow-up {data-eyebrow="Part 1 · Check"}
 
 ```{r}
@@ -276,6 +301,16 @@ knitr::include_graphics(age.lst$slide_figure)
 #| fig-cap: !expr 'sprintf("%d people, adjusted for age at the first test (curves for age %.0f). %s are in the same group as on age.", years.lst$participants, years.lst$total$age_mean, pct.fn(same_class_n, years.lst$participants))'
 knitr::include_graphics(years.lst$slide_figure)
 ```
+
+::: {.notes}
+The same kind of model on years since the first test instead of age, with
+age at the first test (and its change over time) shared by all groups:
+`r years.lst$n_classes` groups, `r tolower(years.lst$degree)`.
+
+Group sizes on this scale: `r paste(sprintf("%s %d", tolower(years.lst$classes$group), years.lst$classes$n), collapse = ", ")`.
+`r pct.fn(same_class_n, years.lst$participants)` of people are in the same
+group on both scales; the slides use the groups on age.
+:::
 
 ## Describing the groups {data-eyebrow="Part 1 · Method"}
 
@@ -312,6 +347,19 @@ main group. `r cx$memory_n$participants` people,
 knitr::include_graphics(cx$profile_slide_figure)
 ```
 
+::: {.notes}
+Each dot is the share of a group with that characteristic, the line its 95%
+confidence interval; the counts are beside it.
+
+Amyloid and tau are known only for people with PET:
+`r class_path.dt[group == main.dt$group, n_pet]` in the main group,
+`r class_path.dt[group == compared, n_pet]` in the faster-decline group and
+`r class_path.dt[group == other.dt$group, n_pet]` in the floor group.
+
+With so few people in the two smaller groups the intervals overlap widely;
+the shares are described, not compared with a test.
+:::
+
 ## `r tau_main` of the `r sum(tau.dt$N)` tau-positive people are in the main group {data-eyebrow="Part 1 · Who is in each group"}
 
 ```{r}
@@ -319,6 +367,16 @@ knitr::include_graphics(cx$profile_slide_figure)
 #| fig-cap: !expr 'sprintf("%d people with amyloid and tau PET, %s of them in the main group; counts in the bars.<br>Positive: Centiloid > %g; tau meta-ROI SUVR > %g.", cx$at_groups[, sum(N)], pct.fn(cx$at_groups[startsWith(as.character(group), main.dt$group), sum(N)], cx$at_groups[, sum(N)]), pathology$amyloid_cutoff, pathology$tau_cutoff)'
 knitr::include_graphics(cx$at_slide_figure)
 ```
+
+::: {.notes}
+Each bar is one group, split by amyloid (A) and tau (T) status at the first
+PET scan; the numbers are people.
+
+The main group holds `r pct.fn(cx$at_groups[startsWith(as.character(group), main.dt$group), sum(N)], cx$at_groups[, sum(N)])`
+of everyone with PET and `r pct.fn(tau_main, sum(tau.dt$N))` of the
+tau-positive people, in line with its size. Tau positivity is rare in every
+group.
+:::
 
 ## In the faster-decline group, `r reduced_faster` of `r sum(first_faster.dt$N)` had reduced smell at the first test {data-eyebrow="Part 1 · Who is in each group"}
 
@@ -328,6 +386,16 @@ knitr::include_graphics(cx$at_slide_figure)
 knitr::include_graphics(cx$diagnosis_slide_figure)
 ```
 
+::: {.notes}
+Olfactory diagnosis from the UPSIT norms, as recorded with each person's
+first and last test.
+
+In the faster-decline group, `r first_faster.dt[level == "Normosmia", sum(N)]`
+of `r sum(first_faster.dt$N)` had normal smell at the first test. In the
+floor group, `r cx$diagnoses[startsWith(as.character(panel), other.dt$group) & group == "First" & level %in% c("Severe microsmia", "Anosmia"), sum(N)]`
+of `r other.dt$n` had severe microsmia or anosmia from the start.
+:::
+
 ## Memory declined faster only in the floor group, of `r other.dt$n` people {data-eyebrow="Part 1 · Memory by group"}
 
 ```{r}
@@ -335,6 +403,20 @@ knitr::include_graphics(cx$diagnosis_slide_figure)
 #| fig-cap: !expr 'sprintf("Delayed memory index points lost a year: main %s, faster decline %s, floor %s.<br>Extra loss a year, floor against main: %s (%d people). %d people, %s RBANS visits; curves for age %g.", mem_loss.fn(main.dt$group), mem_loss.fn(compared), mem_loss.fn(other.dt$group), mem_diff.fn(other.dt$group), other.dt$n, cx$memory_n$participants, big.fn(cx$memory_n$visits), traj$age_centre)'
 knitr::include_graphics(cx$memory_slide_figure)
 ```
+
+::: {.notes}
+Lines: predicted delayed memory for each group, for age `r traj$age_centre`
+at the first smell test, average sex and education, RBANS version A and no
+practice gain, with 95% bands.
+
+At the first smell test the groups did not clearly differ in delayed memory,
+difference from the main group: faster decline
+`r res.fn(with(mem.fn(compared), list(estimate = baseline_diff, lower = baseline_lower, upper = baseline_upper, p = baseline_p)), with_p = TRUE)`,
+floor `r res.fn(with(mem.fn(other.dt$group), list(estimate = baseline_diff, lower = baseline_lower, upper = baseline_upper, p = baseline_p)), with_p = TRUE)`.
+
+The floor result rests on `r other.dt$n` people and is one of several
+comparisons, with no correction for multiple testing.
+:::
 
 # Is faster smell loss a sign of Alzheimer's pathology? {.divider data-eyebrow="Part 2 · Smell and pathology"}
 
@@ -356,9 +438,7 @@ lcmm::hlme (one class), maximum likelihood, Wald 95% CIs. Fixed effects:
 years + marker + marker × years + age at first test + sex, each covariate
 × years. Random intercept and slope, unstructured. Continuous markers:
 Centiloid per `r pathology$centiloid_step`, SUVR per `r pathology$tau_step`.
-A/T groups in one model. `r big.fn(pathology$assessments)` tests; first PET
-a median of `r num.fn(pathology$years_to_pet_median, 1)` years after the
-first UPSIT.
+A/T groups in one model, in place of the amyloid or tau term.
 :::
 
 ## Smell declines faster with amyloid and with tau {data-eyebrow="Part 2 · Amyloid and tau"}
@@ -368,6 +448,28 @@ first UPSIT.
 #| fig-cap: !expr 'sprintf("%d people with PET. Extra UPSIT points lost a year: amyloid %s, tau %s.<br>%d tau positive; PET came a median of %.1f years after the first smell test.", pathology$participants, loss_res.fn(pathology$amyloid$difference), loss_res.fn(pathology$tau$difference), pathology$tau_positive, pathology$years_to_pet_median)'
 knitr::include_graphics(pathology$slide_figure)
 ```
+
+::: {.notes}
+Lines: predicted UPSIT over years since the first test by status at the
+first PET scan, with 95% bands. `r big.fn(pathology$assessments)` tests from
+`r pathology$participants` people.
+
+At the first test, amyloid-positive and negative people scored about the
+same, a difference in UPSIT points of
+`r res.fn(pathology$amyloid$baseline, with_p = TRUE)`. The difference is in
+how fast they decline.
+
+As continuous measures, extra UPSIT points lost a year: per
+`r pathology$centiloid_step` Centiloid `r loss_res.fn(pathology$amyloid$per_step)`;
+per `r pathology$tau_step` tau SUVR `r loss_res.fn(pathology$tau$per_step)`.
+Adding APOE ε4 and education: amyloid
+`r loss_res.fn(pathology$amyloid$sensitivity)`, tau
+`r loss_res.fn(pathology$tau$sensitivity)`.
+
+PET came a median of `r num.fn(pathology$years_to_pet_median, 1)` years after
+the first smell test; for `r pathology$pet_after_last_upsit` people it came
+after their last one.
+:::
 
 ## Loss a year with amyloid, tau or both {data-eyebrow="Part 2 · Amyloid and tau"}
 
@@ -402,6 +504,15 @@ knitr::include_graphics(pathology$slide_figure)
 `r loss_ci.fn(at.fn("A+T+"))` points a year.
 :::
 
+::: {.notes}
+Each card is the yearly UPSIT loss within one A/T group, from one model with
+the A/T groups in place of amyloid or tau; these are rates, not differences.
+
+A−T+ (`r pathology$at_sizes[group == "A-T+", N]` people) is too small to
+model. A+T+ rests on `r at.fn("A+T+")$participants` people, hence its wide
+interval.
+:::
+
 ## APOE ε4, sex and progression to MCI {data-eyebrow="Part 2 · Method"}
 
 - UPSIT over years since the first test, linear mixed models as before
@@ -423,8 +534,6 @@ years term is the average yearly change. Progression: UPSIT ~ 0 + group +
 group × years + (age at the first test + sex) × years; groups A− or A+ at
 the first PET × stayed unimpaired or diagnosed with MCI (first MCI visit in
 the study's MCI review; `r md$n$reverted_left_out` reverted cases left out).
-Progression is known only after the fact and the MCI groups are small, so
-these slopes are descriptive.
 :::
 
 ## No clear difference in smell decline by APOE ε4 or by sex {data-eyebrow="Part 2 · APOE and sex"}
@@ -458,6 +567,13 @@ these slopes are descriptive.
 [`r md$n$participants` people. Extra loss against non-carriers and against
 men.]{.small}
 
+::: {.notes}
+"Everyone" is the average yearly loss across the `r md$n$participants`
+people. The other two cards are the extra loss a year in carriers against
+non-carriers, and in women against men, from the same model, adjusted for
+age at the first test. A carrier has one or two ε4 alleles.
+:::
+
 ## Smell fell fastest with both amyloid and a later MCI diagnosis {data-eyebrow="Part 2 · Progression to MCI"}
 
 ```{r}
@@ -465,6 +581,23 @@ men.]{.small}
 #| fig-cap: !expr 'sprintf("%d people with PET. UPSIT points lost a year: amyloid positive and later MCI %s %s.<br>Extra loss with amyloid: stayed unimpaired %s; diagnosed with MCI %s.", md$n$progression_participants, loss.fn(prog.fn("A+ MCI")), loss_ci.fn(prog.fn("A+ MCI")), loss_res.fn(adiff.fn("stayed"), with_p = TRUE), loss_res.fn(adiff.fn("MCI"), with_p = TRUE))'
 knitr::include_graphics(md$progression_slide_figure)
 ```
+
+::: {.notes}
+Lines: predicted UPSIT for each group, for age `r traj$age_centre` at the
+first test and average sex, with 95% bands. Amyloid status at the first PET
+scan; MCI from the study's MCI review.
+
+UPSIT points lost a year: A− stayed unimpaired `r loss.fn(prog.fn("A- stayed"))`
+`r loss_ci.fn(prog.fn("A- stayed"))` (`r prog.fn("A- stayed")$n` people),
+A+ stayed `r loss.fn(prog.fn("A+ stayed"))` `r loss_ci.fn(prog.fn("A+ stayed"))`
+(`r prog.fn("A+ stayed")$n`), A− MCI `r loss.fn(prog.fn("A- MCI"))`
+`r loss_ci.fn(prog.fn("A- MCI"))` (`r prog.fn("A- MCI")$n`), A+ MCI
+`r loss.fn(prog.fn("A+ MCI"))` `r loss_ci.fn(prog.fn("A+ MCI"))`
+(`r prog.fn("A+ MCI")$n`).
+
+Progression is known only after the fact and the MCI groups are small, so
+these slopes describe the groups; they do not predict who will progress.
+:::
 
 # Does poorer smell come with memory decline and MCI? {.divider data-eyebrow="Part 3 · Smell, memory and MCI"}
 
@@ -483,11 +616,8 @@ and diagnoses of mild cognitive impairment
 Over time: nlme::lme, REML; RBANS ~ years × UPSIT + (age + sex +
 education) × years + version (A to D) + practice (first RBANS vs later);
 random intercept and slope, unstructured. RBANS delayed memory index, 60–69
-norms (not age-adjusted). Sensitivity: + APOE ε4. Secondary outcomes, more
-points lost a year per `r step` UPSIT points lower: immediate memory
-`r num.fn(-low$h2[[immediate]]$estimate)` (`r p.fn(low$h2[[immediate]]$p)`),
-total scale `r num.fn(-low$h2[[total]]$estimate)`
-(`r p.fn(low$h2[[total]]$p)`).
+norms (not age-adjusted). At the first visit: linear regression with the same
+covariates. Sensitivity models add APOE ε4.
 :::
 
 ## Poorer smell: no memory difference at the first test and no clear faster decline {data-eyebrow="Part 3 · Smell and memory"}
@@ -497,6 +627,27 @@ total scale `r num.fn(-low$h2[[total]]$estimate)`
 #| fig-cap: !expr 'sprintf("%d people. Per %d UPSIT points lower, difference at the first test: %s; extra points lost a year: %s.", cog$rbans$participants, step, res.fn(low$h1[[delayed]], with_p = TRUE), loss_res.fn(low$h2[[delayed]], with_p = TRUE))'
 knitr::include_graphics(cog$memory_slide_figure)
 ```
+
+::: {.notes}
+Lines: predicted delayed memory for people at the 25th and 75th percentiles
+of the first UPSIT, for average age, sex and education, with 95% bands.
+
+On average, delayed memory fell `r num.fn(-cog$memory_annual_change$estimate)`
+points a year; a second RBANS scored `r num.fn(cog$memory_retest$estimate)`
+points higher from practice.
+
+Per `r step` UPSIT points lower, extra points lost a year on the other RBANS
+scores: immediate memory `r loss_res.fn(low$h2[[immediate]], with_p = TRUE)`,
+total scale `r loss_res.fn(low$h2[[total]], with_p = TRUE)`.
+With APOE ε4 added: at the first visit `r res.fn(flip.fn(cog$h1_sensitivity), with_p = TRUE)`;
+extra loss `r loss_res.fn(flip.fn(cog$h2_sensitivity), with_p = TRUE)`.
+
+In people with PET, extra loss per `r step` points lower:
+`r loss_res.fn(low$h2_pet_sample, with_p = TRUE)` without amyloid status and
+`r loss_res.fn(low$h2_amyloid, with_p = TRUE)` with it. Amyloid-positive
+people lost `r num.fn(-cog$memory_amyloid_slope$estimate)` more points a year
+(`r p.fn(cog$memory_amyloid_slope$p)`).
+:::
 
 ## Bivariate linear mixed model {data-eyebrow="Part 3 · Method"}
 
@@ -528,6 +679,21 @@ RBANS slope, with an unstructured 4 × 4 covariance (pdSymm). Residuals
 independent, with their own variance per outcome (varIdent; RBANS residual
 SD `r num.fn(cd$residual_ratio, 1)` times UPSIT's). Fitted with nlme::lme,
 REML.
+:::
+
+## Within a person, smell and memory decline together {data-eyebrow="Part 3 · Smell and memory"}
+
+```{r}
+#| fig-align: center
+#| fig-cap: !expr 'sprintf("%d people; each point is one person’s estimated yearly change; dashed lines: no change.<br>Correlation of the two rates: delayed memory %s, immediate memory %s, total scale %s.", cog$coupling$participants, res.fn(r.fn(delayed)), res.fn(r.fn(immediate)), res.fn(r.fn(total)))'
+knitr::include_graphics(cog$coupling$slide_figure)
+```
+
+::: {.notes}
+Each dot is one person's estimated yearly change in smell and in delayed
+memory. Dashed lines: no change; the shaded corner is where both decline.
+The line is fitted through the dots. The dots are shrunk toward the average,
+so they show the direction of the correlation, not its strength.
 
 Estimate: the covariance of the two random slopes is
 `r num.fn(cd$slope_cov)` per year² (UPSIT points × index points); slope SDs
@@ -549,14 +715,6 @@ says nothing about which declines first. Assumes a straight-line change per
 person; the CI is wide because each person's rate rests on few visits.
 :::
 
-## Within a person, smell and memory decline together {data-eyebrow="Part 3 · Smell and memory"}
-
-```{r}
-#| fig-align: center
-#| fig-cap: !expr 'sprintf("%d people; each point is one person’s estimated yearly change; dashed lines: no change.<br>Correlation of the two rates: delayed memory %s, immediate memory %s, total scale %s.", cog$coupling$participants, res.fn(r.fn(delayed)), res.fn(r.fn(immediate)), res.fn(r.fn(total)))'
-knitr::include_graphics(cog$coupling$slide_figure)
-```
-
 ## Cox proportional hazards models {data-eyebrow="Part 3 · Method"}
 
 - Time from the first UPSIT to the first MCI diagnosis
@@ -568,10 +726,10 @@ knitr::include_graphics(cog$coupling$slide_figure)
 - `r low$h3$main$n` people, `r low$h3$main$events` with MCI
 
 ::: {.notes}
-survival::coxph. Proportional hazards (scaled Schoenfeld residuals) held
-for UPSIT (`r p.fn(cog$h3$main$ph_p_upsit)`), not for education.
-Sensitivity: + APOE ε4. `r cog$mci$reverted` people whose MCI reverted to
-normal left out. Curves for average age, sex and education.
+survival::coxph. Time from the first UPSIT to the first MCI visit; people
+without MCI are followed to the earlier of their last RBANS and the last MCI
+review. `r cog$mci$reverted` people whose MCI reverted to normal are left
+out. Sensitivity model adds APOE ε4.
 :::
 
 ## Poorer smell, higher risk of MCI {data-eyebrow="Part 3 · Smell and MCI"}
@@ -581,6 +739,19 @@ normal left out. Curves for average age, sex and education.
 #| fig-cap: !expr 'sprintf("%d people, %d with MCI. Hazard ratio per %d UPSIT points lower: %s.<br>By %d years: %s with MCI at UPSIT %d, %s at UPSIT %d; %d people still followed.", low$h3$main$n, low$h3$main$events, step, res.fn(low$h3$main, null = 1, with_p = TRUE), horizon$years, sprintf("%.0f%%", risk.fn("low")$fit), risk.fn("low")$upsit, sprintf("%.0f%%", risk.fn("high")$fit), risk.fn("high")$upsit, horizon$at_risk)'
 knitr::include_graphics(cog$mci_slide_figure)
 ```
+
+::: {.notes}
+Curves: predicted share with MCI over time for people at the 25th and 75th
+percentiles of the first UPSIT, for average age, sex and education, with 95%
+bands.
+
+By `r horizon$years` years, `r horizon$at_risk` people were still followed
+and `r horizon$events` of the `r low$h3$main$events` diagnoses had happened.
+
+Proportional hazards held for UPSIT (`r p.fn(cog$h3$main$ph_p_upsit)`), not
+for education. With APOE ε4 added, hazard ratio per `r step` points lower
+`r res.fn(low$h3$sensitivity, null = 1, with_p = TRUE)`.
+:::
 
 ## Adjusting for amyloid status did not change the link with MCI {data-eyebrow="Part 3 · Smell and MCI"}
 
@@ -615,6 +786,15 @@ knitr::include_graphics(cog$mci_slide_figure)
 smell per `r step` UPSIT points lower.**\
 Amyloid status comes from a scan a median of
 `r num.fn(pathology$years_to_pet_median, 1)` years after the first smell test.
+:::
+
+::: {.notes}
+All three cards come from the `r low$h3$amyloid$n` people with PET
+(`r low$h3$amyloid$events` with MCI). Left: smell alone in this group.
+Middle: smell adjusted for amyloid status. Right: amyloid status itself, in
+the adjusted model.
+
+For some people who developed MCI, the PET scan came after the diagnosis.
 :::
 
 # What we found {data-eyebrow="Summary"}
